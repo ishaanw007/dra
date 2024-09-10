@@ -1,25 +1,30 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, Button, Alert, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { StyleSheet, Text, View, Button, Alert, TouchableOpacity, Animated, Easing } from 'react-native';
 import * as Location from 'expo-location';
 import { Magnetometer, Accelerometer } from 'expo-sensors';
 import { CameraView, CameraType, CameraCapturedPicture, useCameraPermissions } from 'expo-camera';
+import { ArrowUp } from 'lucide-react';
+
+const LOCATION_TOLERANCE = 0.0001; // Roughly 10 meters
+const DIRECTION_TOLERANCE = 15; // 15 degrees
+const SMOOTHING_WINDOW_SIZE = 20; // Number of readings to consider for smoothing
+const UPDATE_INTERVAL = 200; // Update interval in milliseconds
 
 const App: React.FC = () => {
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [cameraRef, setCameraRef] = useState<any>(null);
   const [location, setLocation] = useState<any>(null);
   const [savedDirection, setSavedDirection] = useState<number | null>(null);
   const [isLocationSet, setIsLocationSet] = useState<boolean>(false);
-  const [magnetData, setMagnetData] = useState<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
-  const [accelerometerData, setAccelerometerData] = useState<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
   const [currentDirection, setCurrentDirection] = useState<number>(0);
   const [cameraType, setCameraType] = useState<CameraType>('back');
   const [permission, requestPermission] = useCameraPermissions();
+  
+  const directionReadings = useRef<number[]>([]);
+  const animatedDirection = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
-
       if (status !== 'granted') {
         Alert.alert('Permission to access location was denied');
         return;
@@ -33,63 +38,56 @@ const App: React.FC = () => {
         await requestPermission();
       }
 
-      Magnetometer.isAvailableAsync().then((result) => {
-        if (result) {
-          Magnetometer.addListener(setMagnetData);
-        }
-      });
+      Magnetometer.setUpdateInterval(UPDATE_INTERVAL);
+      Accelerometer.setUpdateInterval(UPDATE_INTERVAL);
 
-      Accelerometer.isAvailableAsync().then((result) => {
-        if (result) {
-          Accelerometer.addListener(setAccelerometerData);
-        }
+      const magnetSubscription = Magnetometer.addListener(magData => {
+        const accData = Accelerometer.addListener(accData => {
+          calculateTiltCompensatedDirection(magData, accData);
+          accData.remove();
+        });
       });
 
       return () => {
-        Magnetometer.removeAllListeners();
-        Accelerometer.removeAllListeners();
+        magnetSubscription.remove();
       };
     })();
   }, [permission, requestPermission]);
 
-  useEffect(() => {
-    calculateDirection();
-  }, [magnetData, accelerometerData]);
+  const calculateTiltCompensatedDirection = (magData: any, accData: any) => {
+    const { x: mx, y: my, z: mz } = magData;
+    const { x: ax, y: ay, z: az } = accData;
 
-  const calculateDirection = () => {
-    const { x: magX, y: magY, z: magZ } = magnetData;
-    const { x: accX, y: accY, z: accZ } = accelerometerData;
+    const pitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az));
+    const roll = Math.atan2(ay, az);
 
-    // Calculate pitch and roll
-    const pitch = Math.atan2(-accX, Math.sqrt(accY * accY + accZ * accZ));
-    const roll = Math.atan2(accY, accZ);
+    const xh = mx * Math.cos(pitch) + mz * Math.sin(pitch);
+    const yh = mx * Math.sin(roll) * Math.sin(pitch) + my * Math.cos(roll) - mz * Math.sin(roll) * Math.cos(pitch);
 
-    // Tilt compensated magnetic sensor measurements
-    const magXComp = magX * Math.cos(pitch) + magZ * Math.sin(pitch);
-    const magYComp = magX * Math.sin(roll) * Math.sin(pitch) + magY * Math.cos(roll) - magZ * Math.sin(roll) * Math.cos(pitch);
+    let heading = Math.atan2(yh, xh) * (180 / Math.PI);
+    if (heading < 0) heading += 360;
 
-    // Calculate heading
-    let heading = Math.atan2(magYComp, magXComp);
-
-    // Convert to degrees
-    heading = heading * (180 / Math.PI);
-    if (heading < 0) {
-      heading += 360;
+    directionReadings.current.push(heading);
+    if (directionReadings.current.length > SMOOTHING_WINDOW_SIZE) {
+      directionReadings.current.shift();
     }
 
-    setCurrentDirection(heading);
+    const smoothedDirection = directionReadings.current.reduce((a, b) => a + b) / directionReadings.current.length;
+    const roundedDirection = Math.round(smoothedDirection);
+
+    setCurrentDirection(roundedDirection);
+    
+    Animated.timing(animatedDirection, {
+      toValue: roundedDirection,
+      duration: UPDATE_INTERVAL,
+      easing: Easing.linear,
+      useNativeDriver: true
+    }).start();
   };
 
   const getCardinalDirection = (degree: number) => {
-    if (degree >= 337.5 || degree < 22.5) return 'North';
-    if (degree >= 22.5 && degree < 67.5) return 'Northeast';
-    if (degree >= 67.5 && degree < 112.5) return 'East';
-    if (degree >= 112.5 && degree < 157.5) return 'Southeast';
-    if (degree >= 157.5 && degree < 202.5) return 'South';
-    if (degree >= 202.5 && degree < 247.5) return 'Southwest';
-    if (degree >= 247.5 && degree < 292.5) return 'West';
-    if (degree >= 292.5 && degree < 337.5) return 'Northwest';
-    return 'Unknown';
+    const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    return directions[Math.round(degree / 45) % 8];
   };
 
   const setLocationAndDirection = async () => {
@@ -97,7 +95,7 @@ const App: React.FC = () => {
     setLocation(location);
     setSavedDirection(currentDirection);
     setIsLocationSet(true);
-    Alert.alert('Location and Direction Set', `Latitude: ${location.coords.latitude}, Longitude: ${location.coords.longitude}, Direction: ${currentDirection.toFixed(2)}° ${getCardinalDirection(currentDirection)}`);
+    Alert.alert('Location and Direction Set', `Latitude: ${location.coords.latitude.toFixed(6)}, Longitude: ${location.coords.longitude.toFixed(6)}, Direction: ${currentDirection}° ${getCardinalDirection(currentDirection)}`);
   };
 
   const takePhoto = async () => {
@@ -105,31 +103,31 @@ const App: React.FC = () => {
       let currentLocation = await Location.getCurrentPositionAsync({});
       let directionDifference = Math.abs(currentDirection - savedDirection!);
 
-      // Allow a tolerance of ±5 degrees for the direction check
-      if (
-        currentLocation.coords.latitude === location?.coords.latitude &&
-        currentLocation.coords.longitude === location?.coords.longitude &&
-        directionDifference <= 2
-      ) {
+      const isLocationMatched = 
+        Math.abs(currentLocation.coords.latitude - location.coords.latitude) <= LOCATION_TOLERANCE &&
+        Math.abs(currentLocation.coords.longitude - location.coords.longitude) <= LOCATION_TOLERANCE;
+
+      const isDirectionMatched = directionDifference <= DIRECTION_TOLERANCE;
+
+      if (isLocationMatched && isDirectionMatched) {
         let photo: CameraCapturedPicture = await cameraRef.takePictureAsync();
         Alert.alert('Photo Taken', `Photo saved to: ${photo.uri}`);
       } else {
-        Alert.alert('Location or Direction Mismatch', 'You are not at the set location or facing the correct direction.');
+        let mismatchReasons = [];
+        if (!isLocationMatched) mismatchReasons.push('location');
+        if (!isDirectionMatched) mismatchReasons.push('direction');
+        Alert.alert('Cannot Take Photo', `Mismatch in ${mismatchReasons.join(' and ')}. Please adjust and try again.`);
       }
     } else {
       Alert.alert('Location Not Set', 'Please set the location and direction first.');
     }
   };
 
-  if (!permission) {
-    return <View />;
-  }
-
-  if (!permission.granted) {
+  if (!permission?.granted) {
     return (
       <View style={styles.container}>
         <Text style={styles.message}>We need your permission to show the camera</Text>
-        <Button onPress={requestPermission} title="grant permission" />
+        <Button onPress={requestPermission} title="Grant permission" />
       </View>
     );
   }
@@ -137,13 +135,23 @@ const App: React.FC = () => {
   return (
     <View style={styles.container}>
       <CameraView style={styles.camera} ref={(ref: any) => setCameraRef(ref)}>
+        <Animated.View style={[styles.compassContainer, {
+          transform: [{
+            rotate: animatedDirection.interpolate({
+              inputRange: [0, 360],
+              outputRange: ['0deg', '360deg']
+            })
+          }]
+        }]}>
+          <ArrowUp size={48} color="red" />
+        </Animated.View>
         <View style={styles.buttonContainer}>
           <TouchableOpacity style={styles.button} onPress={() => setCameraType(cameraType === 'back' ? 'front' : 'back')}>
             <Text style={styles.text}>Flip Camera</Text>
           </TouchableOpacity>
         </View>
       </CameraView>
-      <View style={styles.buttonContainer}>
+      <View style={styles.controlsContainer}>
         <Button title="Set Location and Direction" onPress={setLocationAndDirection} />
         <Button title="Take Photo" onPress={takePhoto} />
       </View>
@@ -151,10 +159,10 @@ const App: React.FC = () => {
         <View>
           <Text>Saved Latitude: {location.coords.latitude.toFixed(6)}</Text>
           <Text>Saved Longitude: {location.coords.longitude.toFixed(6)}</Text>
-          <Text>Saved Direction: {savedDirection!.toFixed(2)}° {getCardinalDirection(savedDirection!)}</Text>
+          <Text>Saved Direction: {savedDirection}° {getCardinalDirection(savedDirection!)}</Text>
         </View>
       )}
-      <Text>Current Direction: {currentDirection.toFixed(2)}° {getCardinalDirection(currentDirection)}</Text>
+      <Text>Current Direction: {currentDirection}° {getCardinalDirection(currentDirection)}</Text>
     </View>
   );
 };
@@ -186,6 +194,14 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: 'white',
+  },
+  controlsContainer: {
+    padding: 20,
+  },
+  compassContainer: {
+    position: 'absolute',
+    top: 20,
+    left: 20,
   },
 });
 
