@@ -3,7 +3,7 @@ import { StyleSheet, Text, View, Button, Alert, TouchableOpacity, Animated, Easi
 import * as Location from 'expo-location';
 import { Magnetometer, Accelerometer } from 'expo-sensors';
 import { CameraView, CameraType, CameraCapturedPicture, useCameraPermissions } from 'expo-camera';
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp } from 'lucide-react-native';
 
 const LOCATION_TOLERANCE = 0.0001; // Roughly 10 meters
 const DIRECTION_TOLERANCE = 15; // 15 degrees
@@ -42,9 +42,9 @@ const App: React.FC = () => {
       Accelerometer.setUpdateInterval(UPDATE_INTERVAL);
 
       const magnetSubscription = Magnetometer.addListener(magData => {
-        const accData = Accelerometer.addListener(accData => {
+        const accSubscription = Accelerometer.addListener(accData => {
           calculateTiltCompensatedDirection(magData, accData);
-          accData.remove();
+          accSubscription.remove();
         });
       });
 
