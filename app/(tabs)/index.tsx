@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, Button, Alert, TouchableOpacity } from 'react-native';
 import * as Location from 'expo-location';
-import { Magnetometer } from 'expo-sensors';
+import { Magnetometer, Accelerometer } from 'expo-sensors';
 import { CameraView, CameraType, CameraCapturedPicture, useCameraPermissions } from 'expo-camera';
 
 const App: React.FC = () => {
@@ -11,6 +11,7 @@ const App: React.FC = () => {
   const [savedDirection, setSavedDirection] = useState<number | null>(null);
   const [isLocationSet, setIsLocationSet] = useState<boolean>(false);
   const [magnetData, setMagnetData] = useState<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
+  const [accelerometerData, setAccelerometerData] = useState<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
   const [currentDirection, setCurrentDirection] = useState<number>(0);
   const [cameraType, setCameraType] = useState<CameraType>('back');
   const [permission, requestPermission] = useCameraPermissions();
@@ -34,19 +35,44 @@ const App: React.FC = () => {
 
       Magnetometer.isAvailableAsync().then((result) => {
         if (result) {
-          Magnetometer.addListener((magnetometerData) => {
-            setMagnetData(magnetometerData);
-            calculateDirection(magnetometerData);
-          });
+          Magnetometer.addListener(setMagnetData);
         }
       });
+
+      Accelerometer.isAvailableAsync().then((result) => {
+        if (result) {
+          Accelerometer.addListener(setAccelerometerData);
+        }
+      });
+
+      return () => {
+        Magnetometer.removeAllListeners();
+        Accelerometer.removeAllListeners();
+      };
     })();
   }, [permission, requestPermission]);
 
-  const calculateDirection = (magnetometerData: { x: number; y: number }) => {
-    const { x: magX, y: magY } = magnetometerData;
-    let heading = Math.atan2(magY, magX) * (180 / Math.PI);
+  useEffect(() => {
+    calculateDirection();
+  }, [magnetData, accelerometerData]);
 
+  const calculateDirection = () => {
+    const { x: magX, y: magY, z: magZ } = magnetData;
+    const { x: accX, y: accY, z: accZ } = accelerometerData;
+
+    // Calculate pitch and roll
+    const pitch = Math.atan2(-accX, Math.sqrt(accY * accY + accZ * accZ));
+    const roll = Math.atan2(accY, accZ);
+
+    // Tilt compensated magnetic sensor measurements
+    const magXComp = magX * Math.cos(pitch) + magZ * Math.sin(pitch);
+    const magYComp = magX * Math.sin(roll) * Math.sin(pitch) + magY * Math.cos(roll) - magZ * Math.sin(roll) * Math.cos(pitch);
+
+    // Calculate heading
+    let heading = Math.atan2(magYComp, magXComp);
+
+    // Convert to degrees
+    heading = heading * (180 / Math.PI);
     if (heading < 0) {
       heading += 360;
     }
