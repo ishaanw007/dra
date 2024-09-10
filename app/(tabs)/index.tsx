@@ -1,26 +1,30 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, Button, Alert, TouchableOpacity, Animated, Easing } from 'react-native';
 import * as Location from 'expo-location';
-import { Magnetometer, Accelerometer } from 'expo-sensors';
+import { Magnetometer, Accelerometer, Gyroscope } from 'expo-sensors';
 import { CameraView, CameraType, CameraCapturedPicture, useCameraPermissions } from 'expo-camera';
 import { ArrowUp } from 'lucide-react';
+import * as THREE from 'three';
 
 const LOCATION_TOLERANCE = 0.0001; // Roughly 10 meters
-const DIRECTION_TOLERANCE = 15; // 15 degrees
+const ORIENTATION_TOLERANCE = 0.1; // Tolerance for quaternion comparison
 const SMOOTHING_WINDOW_SIZE = 20; // Number of readings to consider for smoothing
 const UPDATE_INTERVAL = 200; // Update interval in milliseconds
+const SPHERE_SEGMENTS = 16; // Number of segments to divide the sphere into
 
 const App: React.FC = () => {
   const [cameraRef, setCameraRef] = useState<any>(null);
   const [location, setLocation] = useState<any>(null);
-  const [savedDirection, setSavedDirection] = useState<number | null>(null);
+  const [savedOrientation, setSavedOrientation] = useState<THREE.Quaternion | null>(null);
+  const [savedSphereBlock, setSavedSphereBlock] = useState<number | null>(null);
   const [isLocationSet, setIsLocationSet] = useState<boolean>(false);
-  const [currentDirection, setCurrentDirection] = useState<number>(0);
+  const [currentOrientation, setCurrentOrientation] = useState<THREE.Quaternion>(new THREE.Quaternion());
+  const [currentSphereBlock, setCurrentSphereBlock] = useState<number>(0);
   const [cameraType, setCameraType] = useState<CameraType>('back');
   const [permission, requestPermission] = useCameraPermissions();
   
-  const directionReadings = useRef<number[]>([]);
-  const animatedDirection = useRef(new Animated.Value(0)).current;
+  const orientationReadings = useRef<THREE.Quaternion[]>([]);
+  const animatedRotation = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
   useEffect(() => {
     (async () => {
@@ -40,11 +44,15 @@ const App: React.FC = () => {
 
       Magnetometer.setUpdateInterval(UPDATE_INTERVAL);
       Accelerometer.setUpdateInterval(UPDATE_INTERVAL);
+      Gyroscope.setUpdateInterval(UPDATE_INTERVAL);
 
       const magnetSubscription = Magnetometer.addListener(magData => {
-        const accData = Accelerometer.addListener(accData => {
-          calculateTiltCompensatedDirection(magData, accData);
-          accData.remove();
+        const accSubscription = Accelerometer.addListener(accData => {
+          const gyroSubscription = Gyroscope.addListener(gyroData => {
+            calculateDeviceOrientation(magData, accData, gyroData);
+            gyroSubscription.remove();
+          });
+          accSubscription.remove();
         });
       });
 
@@ -54,72 +62,90 @@ const App: React.FC = () => {
     })();
   }, [permission, requestPermission]);
 
-  const calculateTiltCompensatedDirection = (magData: any, accData: any) => {
+  const calculateDeviceOrientation = (magData: any, accData: any, gyroData: any) => {
     const { x: mx, y: my, z: mz } = magData;
     const { x: ax, y: ay, z: az } = accData;
+    const { x: gx, y: gy, z: gz } = gyroData;
 
-    const pitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az));
-    const roll = Math.atan2(ay, az);
+    const rotationMatrix = new THREE.Matrix4();
+    const quaternion = new THREE.Quaternion();
 
-    const xh = mx * Math.cos(pitch) + mz * Math.sin(pitch);
-    const yh = mx * Math.sin(roll) * Math.sin(pitch) + my * Math.cos(roll) - mz * Math.sin(roll) * Math.cos(pitch);
+    // Calculate rotation matrix from accelerometer data
+    const gravity = new THREE.Vector3(ax, ay, az).normalize();
+    const xAxis = new THREE.Vector3(my * gravity.z - mz * gravity.y, mz * gravity.x - mx * gravity.z, mx * gravity.y - my * gravity.x).normalize();
+    const yAxis = gravity.clone().cross(xAxis);
 
-    let heading = Math.atan2(yh, xh) * (180 / Math.PI);
-    if (heading < 0) heading += 360;
+    rotationMatrix.makeBasis(xAxis, yAxis, gravity);
+    quaternion.setFromRotationMatrix(rotationMatrix);
 
-    directionReadings.current.push(heading);
-    if (directionReadings.current.length > SMOOTHING_WINDOW_SIZE) {
-      directionReadings.current.shift();
+    // Apply gyroscope data
+    const gyroQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(gx * UPDATE_INTERVAL / 1000, gy * UPDATE_INTERVAL / 1000, gz * UPDATE_INTERVAL / 1000));
+    quaternion.multiply(gyroQuaternion);
+
+    orientationReadings.current.push(quaternion);
+    if (orientationReadings.current.length > SMOOTHING_WINDOW_SIZE) {
+      orientationReadings.current.shift();
     }
 
-    const smoothedDirection = directionReadings.current.reduce((a, b) => a + b) / directionReadings.current.length;
-    const roundedDirection = Math.round(smoothedDirection);
+    const smoothedQuaternion = new THREE.Quaternion();
+    for (const q of orientationReadings.current) {
+      smoothedQuaternion.multiply(q);
+    }
+    smoothedQuaternion.normalize();
 
-    setCurrentDirection(roundedDirection);
+    setCurrentOrientation(smoothedQuaternion);
+    const sphereBlock = calculateSphereBlock(smoothedQuaternion);
+    setCurrentSphereBlock(sphereBlock);
     
-    Animated.timing(animatedDirection, {
-      toValue: roundedDirection,
+    const euler = new THREE.Euler().setFromQuaternion(smoothedQuaternion);
+    Animated.timing(animatedRotation, {
+      toValue: { x: euler.x, y: euler.y },
       duration: UPDATE_INTERVAL,
       easing: Easing.linear,
       useNativeDriver: true
     }).start();
   };
 
-  const getCardinalDirection = (degree: number) => {
-    const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-    return directions[Math.round(degree / 45) % 8];
+  const calculateSphereBlock = (quaternion: THREE.Quaternion): number => {
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion);
+    const spherical = new THREE.Spherical().setFromVector3(forward);
+    const thetaIndex = Math.floor((spherical.theta / Math.PI) * SPHERE_SEGMENTS / 2);
+    const phiIndex = Math.floor((spherical.phi / Math.PI) * SPHERE_SEGMENTS);
+    return thetaIndex * SPHERE_SEGMENTS + phiIndex;
   };
 
-  const setLocationAndDirection = async () => {
+  const setLocationAndOrientation = async () => {
     let location = await Location.getCurrentPositionAsync({});
     setLocation(location);
-    setSavedDirection(currentDirection);
+    setSavedOrientation(currentOrientation);
+    setSavedSphereBlock(currentSphereBlock);
     setIsLocationSet(true);
-    Alert.alert('Location and Direction Set', `Latitude: ${location.coords.latitude.toFixed(6)}, Longitude: ${location.coords.longitude.toFixed(6)}, Direction: ${currentDirection}° ${getCardinalDirection(currentDirection)}`);
+    Alert.alert('Location and Orientation Set', `Latitude: ${location.coords.latitude.toFixed(6)}, Longitude: ${location.coords.longitude.toFixed(6)}, Sphere Block: ${currentSphereBlock}`);
   };
 
   const takePhoto = async () => {
     if (cameraRef && isLocationSet) {
       let currentLocation = await Location.getCurrentPositionAsync({});
-      let directionDifference = Math.abs(currentDirection - savedDirection!);
 
       const isLocationMatched = 
         Math.abs(currentLocation.coords.latitude - location.coords.latitude) <= LOCATION_TOLERANCE &&
         Math.abs(currentLocation.coords.longitude - location.coords.longitude) <= LOCATION_TOLERANCE;
 
-      const isDirectionMatched = directionDifference <= DIRECTION_TOLERANCE;
+      const isOrientationMatched = 
+        Math.abs(1 - currentOrientation.dot(savedOrientation!)) <= ORIENTATION_TOLERANCE &&
+        currentSphereBlock === savedSphereBlock;
 
-      if (isLocationMatched && isDirectionMatched) {
+      if (isLocationMatched && isOrientationMatched) {
         let photo: CameraCapturedPicture = await cameraRef.takePictureAsync();
         Alert.alert('Photo Taken', `Photo saved to: ${photo.uri}`);
       } else {
         let mismatchReasons = [];
         if (!isLocationMatched) mismatchReasons.push('location');
-        if (!isDirectionMatched) mismatchReasons.push('direction');
+        if (!isOrientationMatched) mismatchReasons.push('orientation');
         Alert.alert('Cannot Take Photo', `Mismatch in ${mismatchReasons.join(' and ')}. Please adjust and try again.`);
       }
     } else {
-      Alert.alert('Location Not Set', 'Please set the location and direction first.');
+      Alert.alert('Location Not Set', 'Please set the location and orientation first.');
     }
   };
 
@@ -135,13 +161,19 @@ const App: React.FC = () => {
   return (
     <View style={styles.container}>
       <CameraView style={styles.camera} ref={(ref: any) => setCameraRef(ref)}>
-        <Animated.View style={[styles.compassContainer, {
-          transform: [{
-            rotate: animatedDirection.interpolate({
-              inputRange: [0, 360],
-              outputRange: ['0deg', '360deg']
-            })
-          }]
+        <Animated.View style={[styles.orientationIndicator, {
+          transform: [
+            { rotateX: animatedRotation.x.interpolate({
+                inputRange: [-Math.PI, Math.PI],
+                outputRange: ['-180deg', '180deg']
+              })
+            },
+            { rotateY: animatedRotation.y.interpolate({
+                inputRange: [-Math.PI, Math.PI],
+                outputRange: ['-180deg', '180deg']
+              })
+            }
+          ]
         }]}>
           <ArrowUp size={48} color="red" />
         </Animated.View>
@@ -152,17 +184,17 @@ const App: React.FC = () => {
         </View>
       </CameraView>
       <View style={styles.controlsContainer}>
-        <Button title="Set Location and Direction" onPress={setLocationAndDirection} />
+        <Button title="Set Location and Orientation" onPress={setLocationAndOrientation} />
         <Button title="Take Photo" onPress={takePhoto} />
       </View>
       {isLocationSet && location && (
         <View>
           <Text>Saved Latitude: {location.coords.latitude.toFixed(6)}</Text>
           <Text>Saved Longitude: {location.coords.longitude.toFixed(6)}</Text>
-          <Text>Saved Direction: {savedDirection}° {getCardinalDirection(savedDirection!)}</Text>
+          <Text>Saved Sphere Block: {savedSphereBlock}</Text>
         </View>
       )}
-      <Text>Current Direction: {currentDirection}° {getCardinalDirection(currentDirection)}</Text>
+      <Text>Current Sphere Block: {currentSphereBlock}</Text>
     </View>
   );
 };
@@ -198,7 +230,7 @@ const styles = StyleSheet.create({
   controlsContainer: {
     padding: 20,
   },
-  compassContainer: {
+  orientationIndicator: {
     position: 'absolute',
     top: 20,
     left: 20,
