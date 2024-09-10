@@ -19,7 +19,8 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "package": "com.modernyogi.Dra"
     },
     "web": {
       "bundler": "metro",
@@ -28,16 +29,12 @@
     },
     "plugins": [
       "expo-router",
-   
-            [
-              "expo-sensors",
-              {
-                "motionPermission": "Allow $(PRODUCT_NAME) to access your device motion"
-              }
-            ]
-          
-        
-      
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "Allow $(PRODUCT_NAME) to access your device motion"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
