@@ -34,6 +34,22 @@ const App: React.FC = () => {
   const orientationReadings = useRef<THREE.Quaternion[]>([]);
   const animatedRotation = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
+  const generateBlocks = (): Block[] => {
+    const newBlocks: Block[] = [];
+    for (let i = 0; i < SPHERE_SEGMENTS * SPHERE_SEGMENTS / 2; i++) {
+      const theta = (i % SPHERE_SEGMENTS) / SPHERE_SEGMENTS * Math.PI * 2;
+      const phi = Math.floor(i / SPHERE_SEGMENTS) / (SPHERE_SEGMENTS / 2) * Math.PI;
+      const x = Math.sin(phi) * Math.cos(theta);
+      const y = Math.cos(phi);
+      newBlocks.push({
+        id: i,
+        color: `hsl(${(i / (SPHERE_SEGMENTS * SPHERE_SEGMENTS / 2)) * 360}, 70%, 50%)`,
+        position: { x: x * 100 + 100, y: -y * 100 + 100 },
+      });
+    }
+    return newBlocks;
+  };
+
   const blocks = useMemo(() => generateBlocks(), []);
 
   useEffect(() => {
