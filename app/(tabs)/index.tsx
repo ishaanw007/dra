@@ -5,9 +5,7 @@ import { Magnetometer } from 'expo-sensors';
 import { CameraView, CameraCapturedPicture, useCameraPermissions } from 'expo-camera';
 
 const SPHERE_SEGMENTS = 4; // 4x4 grid, resulting in 16 total segments
-const UPDATE_INTERVAL = 500; // Less frequent updates (every 500ms)
-const MOVING_AVERAGE_WINDOW = 3; // Reduced number of readings to average
-const DEBOUNCE_DELAY = 1000; // Increased debounce delay (1 second)
+const UPDATE_INTERVAL = 100; // More frequent updates for testing
 
 const App: React.FC = () => {
   const [cameraRef, setCameraRef] = useState<any>(null);
@@ -15,27 +13,6 @@ const App: React.FC = () => {
   const [currentSphereBlock, setCurrentSphereBlock] = useState<string | null>(null);
   const [cameraType, setCameraType] = useState<'back' | 'front'>('back');
   const [permission, requestPermission] = useCameraPermissions();
-  const [magnetometerReadings, setMagnetometerReadings] = useState<number[][]>([]);
-  const debounceTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
-
-  const addMagnetometerReading = (reading: number[]) => {
-    setMagnetometerReadings(prevReadings => {
-      const newReadings = [...prevReadings, reading];
-      if (newReadings.length > MOVING_AVERAGE_WINDOW) {
-        return newReadings.slice(-MOVING_AVERAGE_WINDOW);
-      }
-      return newReadings;
-    });
-  };
-
-  const getAverageReading = () => {
-    if (magnetometerReadings.length === 0) return [0, 0, 0];
-    const sum = magnetometerReadings.reduce(
-      (acc, reading) => [acc[0] + reading[0], acc[1] + reading[1], acc[2] + reading[2]],
-      [0, 0, 0]
-    );
-    return sum.map(value => value / magnetometerReadings.length);
-  };
 
   useEffect(() => {
     (async () => {
@@ -54,29 +31,13 @@ const App: React.FC = () => {
       Magnetometer.addListener(data => {
         const { x, y, z } = data;
         console.log('Magnetometer data:', { x, y, z });
-        addMagnetometerReading([x, y, z]);
-        
-        if (debounceTimeoutRef.current) {
-          clearTimeout(debounceTimeoutRef.current);
-        }
-        
-        debounceTimeoutRef.current = setTimeout(() => {
-          const [avgX, avgY, avgZ] = getAverageReading();
-          console.log('Average reading:', { avgX, avgY, avgZ });
-          const sphereBlock = calculateSphereBlock(avgX, avgY, avgZ);
-          console.log('Calculated sphere block:', sphereBlock);
-          setCurrentSphereBlock(prevBlock => {
-            console.log('Updating sphere block from', prevBlock, 'to', sphereBlock);
-            return sphereBlock;
-          });
-        }, DEBOUNCE_DELAY);
+        const sphereBlock = calculateSphereBlock(x, y, z);
+        console.log('Calculated sphere block:', sphereBlock);
+        setCurrentSphereBlock(sphereBlock);
       });
 
-      // Start the magnetometer after a short delay
-      setTimeout(() => {
-        Magnetometer.setUpdateInterval(UPDATE_INTERVAL);
-        console.log('Magnetometer started with update interval:', UPDATE_INTERVAL);
-      }, 1000);
+      Magnetometer.setUpdateInterval(UPDATE_INTERVAL);
+      console.log('Magnetometer started with update interval:', UPDATE_INTERVAL);
 
       // Check if Magnetometer is available
       const isMagnetometerAvailable = await Magnetometer.isAvailableAsync();
@@ -93,9 +54,6 @@ const App: React.FC = () => {
 
     return () => {
       Magnetometer.removeAllListeners();
-      if (debounceTimeoutRef.current) {
-        clearTimeout(debounceTimeoutRef.current);
-      }
     };
   }, [permission, requestPermission]);
 
