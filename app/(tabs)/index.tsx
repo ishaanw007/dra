@@ -5,7 +5,7 @@ import { Magnetometer } from 'expo-sensors';
 import { CameraView, CameraCapturedPicture, useCameraPermissions } from 'expo-camera';
 
 const SPHERE_SEGMENTS = 4; // 4x4 grid, resulting in 16 total segments
-const UPDATE_INTERVAL = 50; // More frequent updates for precision
+const UPDATE_INTERVAL = 100; // More frequent updates for precision
 const MOVING_AVERAGE_WINDOW = 5; // Number of readings to average
 const DEBOUNCE_DELAY = 200; // Milliseconds to wait before updating state
 
