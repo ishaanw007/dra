@@ -9,19 +9,26 @@ import * as THREE from 'three';
 const LOCATION_TOLERANCE = 0.0001; // Roughly 10 meters
 const ORIENTATION_TOLERANCE = 0.1; // Tolerance for quaternion comparison
 const SMOOTHING_WINDOW_SIZE = 20; // Number of readings to consider for smoothing
-const UPDATE_INTERVAL = 200; // Update interval in milliseconds
+const UPDATE_INTERVAL = 100; // Update interval in milliseconds (reduced for smoother updates)
 const SPHERE_SEGMENTS = 16; // Number of segments to divide the sphere into
+
+interface Block {
+  id: number;
+  color: string;
+  position: { x: number; y: number };
+}
 
 const App: React.FC = () => {
   const [cameraRef, setCameraRef] = useState<any>(null);
-  const [location, setLocation] = useState<any>(null);
+  const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [savedOrientation, setSavedOrientation] = useState<THREE.Quaternion | null>(null);
   const [savedSphereBlock, setSavedSphereBlock] = useState<number | null>(null);
   const [isLocationSet, setIsLocationSet] = useState<boolean>(false);
   const [currentOrientation, setCurrentOrientation] = useState<THREE.Quaternion>(new THREE.Quaternion());
   const [currentSphereBlock, setCurrentSphereBlock] = useState<number>(0);
-  const [cameraType, setCameraType] = useState<CameraType>('back');
+  const [cameraType, setCameraType] = useState<CameraType>(CameraType.back);
   const [permission, requestPermission] = useCameraPermissions();
+  const [blocks, setBlocks] = useState<Block[]>([]);
   
   const orientationReadings = useRef<THREE.Quaternion[]>([]);
   const animatedRotation = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
@@ -56,11 +63,29 @@ const App: React.FC = () => {
         });
       });
 
+      generateBlocks();
+
       return () => {
         magnetSubscription.remove();
       };
     })();
   }, [permission, requestPermission]);
+
+  const generateBlocks = () => {
+    const newBlocks: Block[] = [];
+    for (let i = 0; i < SPHERE_SEGMENTS * SPHERE_SEGMENTS / 2; i++) {
+      const theta = (i % SPHERE_SEGMENTS) / SPHERE_SEGMENTS * Math.PI * 2;
+      const phi = Math.floor(i / SPHERE_SEGMENTS) / (SPHERE_SEGMENTS / 2) * Math.PI;
+      const x = Math.sin(phi) * Math.cos(theta);
+      const y = Math.cos(phi);
+      newBlocks.push({
+        id: i,
+        color: `hsl(${(i / (SPHERE_SEGMENTS * SPHERE_SEGMENTS / 2)) * 360}, 70%, 50%)`,
+        position: { x: x * 100 + 100, y: -y * 100 + 100 },
+      });
+    }
+    setBlocks(newBlocks);
+  };
 
   const calculateDeviceOrientation = (magData: any, accData: any, gyroData: any) => {
     const { x: mx, y: my, z: mz } = magData;
@@ -128,8 +153,8 @@ const App: React.FC = () => {
       let currentLocation = await Location.getCurrentPositionAsync({});
 
       const isLocationMatched = 
-        Math.abs(currentLocation.coords.latitude - location.coords.latitude) <= LOCATION_TOLERANCE &&
-        Math.abs(currentLocation.coords.longitude - location.coords.longitude) <= LOCATION_TOLERANCE;
+        Math.abs(currentLocation.coords.latitude - location!.coords.latitude) <= LOCATION_TOLERANCE &&
+        Math.abs(currentLocation.coords.longitude - location!.coords.longitude) <= LOCATION_TOLERANCE;
 
       const isOrientationMatched = 
         Math.abs(1 - currentOrientation.dot(savedOrientation!)) <= ORIENTATION_TOLERANCE &&
@@ -149,6 +174,24 @@ const App: React.FC = () => {
     }
   };
 
+  const BlockIndicator: React.FC<{ block: Block, isCurrent: boolean }> = ({ block, isCurrent }) => (
+    <Animated.View
+      style={[
+        styles.blockIndicator,
+        {
+          left: block.position.x,
+          top: block.position.y,
+          backgroundColor: block.color,
+          transform: [
+            { scale: isCurrent ? 1.5 : 1 },
+            { translateX: -10 },  // Half of the width
+            { translateY: -10 },  // Half of the height
+          ],
+        },
+      ]}
+    />
+  );
+
   if (!permission?.granted) {
     return (
       <View style={styles.container}>
@@ -160,7 +203,16 @@ const App: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <CameraView style={styles.camera} ref={(ref: any) => setCameraRef(ref)}>
+      <CameraView style={styles.camera} ref={(ref: any) => setCameraRef(ref)} type={cameraType}>
+        <View style={styles.arOverlay}>
+          {blocks.map((block) => (
+            <BlockIndicator
+              key={block.id}
+              block={block}
+              isCurrent={block.id === currentSphereBlock}
+            />
+          ))}
+        </View>
         <Animated.View style={[styles.orientationIndicator, {
           transform: [
             { rotateX: animatedRotation.x.interpolate({
@@ -178,7 +230,7 @@ const App: React.FC = () => {
           <ArrowUp size={48} color="red" />
         </Animated.View>
         <View style={styles.buttonContainer}>
-          <TouchableOpacity style={styles.button} onPress={() => setCameraType(cameraType === 'back' ? 'front' : 'back')}>
+          <TouchableOpacity style={styles.button} onPress={() => setCameraType(cameraType === CameraType.back ? CameraType.front : CameraType.back)}>
             <Text style={styles.text}>Flip Camera</Text>
           </TouchableOpacity>
         </View>
@@ -194,7 +246,7 @@ const App: React.FC = () => {
           <Text>Saved Sphere Block: {savedSphereBlock}</Text>
         </View>
       )}
-      <Text>Current Sphere Block: {currentSphereBlock}</Text>
+      <Text style={styles.blockText}>Current Sphere Block: {currentSphereBlock}</Text>
     </View>
   );
 };
@@ -234,6 +286,26 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 20,
     left: 20,
+  },
+  arOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  blockIndicator: {
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: 'white',
+  },
+  blockText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    padding: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
   },
 });
 
