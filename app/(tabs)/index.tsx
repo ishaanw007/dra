@@ -42,7 +42,7 @@ const App: React.FC = () => {
       }
 
       const { status: cameraStatus } = await Camera.requestCameraPermissionsAsync();
-      setHasCameraPermission(status === 'granted');
+      setHasCameraPermission(cameraStatus === 'granted');
 
       Magnetometer.setUpdateInterval(UPDATE_INTERVAL);
       Accelerometer.setUpdateInterval(UPDATE_INTERVAL);
