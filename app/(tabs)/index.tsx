@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, Button, Alert, TouchableOpacity, Animated, Easing } from 'react-native';
 import * as Location from 'expo-location';
 import { Magnetometer, Accelerometer, Gyroscope } from 'expo-sensors';
-import { CameraView, CameraType, CameraCapturedPicture, useCameraPermissions } from 'expo-camera';
+import { Camera, CameraType } from 'expo-camera';
 import { ArrowUp } from 'lucide-react';
 import * as THREE from 'three';
 
@@ -26,8 +26,8 @@ const App: React.FC = () => {
   const [isLocationSet, setIsLocationSet] = useState<boolean>(false);
   const [currentOrientation, setCurrentOrientation] = useState<THREE.Quaternion>(new THREE.Quaternion());
   const [currentSphereBlock, setCurrentSphereBlock] = useState<number>(0);
-  const [cameraType, setCameraType] = useState<CameraType>(CameraType.back);
-  const [permission, requestPermission] = useCameraPermissions();
+  const [cameraType, setCameraType] = useState(CameraType.Back);
+  const [permission, requestPermission] = Camera.useCameraPermissions();
   const [blocks, setBlocks] = useState<Block[]>([]);
   
   const orientationReadings = useRef<THREE.Quaternion[]>([]);
@@ -203,7 +203,7 @@ const App: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <CameraView style={styles.camera} ref={(ref: any) => setCameraRef(ref)} type={cameraType}>
+      <Camera style={styles.camera} ref={(ref: any) => setCameraRef(ref)} type={cameraType}>
         <View style={styles.arOverlay}>
           {blocks.map((block) => (
             <BlockIndicator
@@ -230,11 +230,11 @@ const App: React.FC = () => {
           <ArrowUp size={48} color="red" />
         </Animated.View>
         <View style={styles.buttonContainer}>
-          <TouchableOpacity style={styles.button} onPress={() => setCameraType(cameraType === CameraType.back ? CameraType.front : CameraType.back)}>
+          <TouchableOpacity style={styles.button} onPress={() => setCameraType(cameraType === CameraType.Back ? CameraType.Front : CameraType.Back)}>
             <Text style={styles.text}>Flip Camera</Text>
           </TouchableOpacity>
         </View>
-      </CameraView>
+      </Camera>
       <View style={styles.controlsContainer}>
         <Button title="Set Location and Orientation" onPress={setLocationAndOrientation} />
         <Button title="Take Photo" onPress={takePhoto} />
