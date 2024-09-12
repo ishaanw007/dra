@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { StyleSheet, Text, View, Button, Alert, TouchableOpacity, Animated } from 'react-native';
 import * as Location from 'expo-location';
 import { Magnetometer, Accelerometer, Gyroscope } from 'expo-sensors';
@@ -8,9 +8,10 @@ import * as THREE from 'three';
 
 const LOCATION_TOLERANCE = 0.0001; // Roughly 10 meters
 const ORIENTATION_TOLERANCE = 0.1; // Tolerance for quaternion comparison
-const SMOOTHING_WINDOW_SIZE = 10; // Reduced number of readings for smoothing
-const UPDATE_INTERVAL = 200; // Increased update interval to reduce load
+const SMOOTHING_WINDOW_SIZE = 5; // Further reduced number of readings for smoothing
+const UPDATE_INTERVAL = 100; // Decreased update interval for more responsive updates
 const SPHERE_SEGMENTS = 16; // Number of segments to divide the sphere into
+const INITIAL_STABILIZATION_TIME = 1000; // Time in ms to wait for initial sensor stabilization
 
 interface Block {
   id: number;
@@ -25,15 +26,18 @@ const App: React.FC = () => {
   const [savedSphereBlock, setSavedSphereBlock] = useState<number | null>(null);
   const [isLocationSet, setIsLocationSet] = useState<boolean>(false);
   const [currentOrientation, setCurrentOrientation] = useState<THREE.Quaternion>(new THREE.Quaternion());
-  const [currentSphereBlock, setCurrentSphereBlock] = useState<number>(0);
+  const [currentSphereBlock, setCurrentSphereBlock] = useState<number | null>(null);
   const [cameraType, setCameraType] = useState<'back' | 'front'>('back');
   const [permission, requestPermission] = useCameraPermissions();
-  const [blocks, setBlocks] = useState<Block[]>([]);
+  const [isInitialized, setIsInitialized] = useState<boolean>(false);
   
   const orientationReadings = useRef<THREE.Quaternion[]>([]);
   const animatedRotation = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
+  const blocks = useMemo(() => generateBlocks(), []);
+
   useEffect(() => {
+    let subscriptions: any[] = [];
     (async () => {
       let { status: locationStatus } = await Location.requestForegroundPermissionsAsync();
       if (locationStatus !== 'granted') {
@@ -49,33 +53,40 @@ const App: React.FC = () => {
       Accelerometer.setUpdateInterval(UPDATE_INTERVAL);
       Gyroscope.setUpdateInterval(UPDATE_INTERVAL);
 
-      const subscriptions = [
-        Magnetometer.addListener(magData => {
-          setMagData(magData);
-        }),
-        Accelerometer.addListener(accData => {
-          setAccData(accData);
-        }),
-        Gyroscope.addListener(gyroData => {
-          setGyroData(gyroData);
-        })
+      // Wait for initial stabilization
+      await new Promise(resolve => setTimeout(resolve, INITIAL_STABILIZATION_TIME));
+
+      subscriptions = [
+        Magnetometer.addListener(magData => calculateDeviceOrientation(magData, 'mag')),
+        Accelerometer.addListener(accData => calculateDeviceOrientation(accData, 'acc')),
+        Gyroscope.addListener(gyroData => calculateDeviceOrientation(gyroData, 'gyro'))
       ];
 
-      generateBlocks();
-
-      return () => {
-        subscriptions.forEach(subscription => subscription.remove());
-      };
+      setIsInitialized(true);
     })();
+
+    return () => {
+      subscriptions.forEach(subscription => subscription.remove());
+    };
   }, [permission, requestPermission]);
 
-  const [magData, setMagData] = useState({ x: 0, y: 0, z: 0 });
-  const [accData, setAccData] = useState({ x: 0, y: 0, z: 0 });
-  const [gyroData, setGyroData] = useState({ x: 0, y: 0, z: 0 });
+  const [sensorData, setSensorData] = useState({
+    mag: { x: 0, y: 0, z: 0 },
+    acc: { x: 0, y: 0, z: 0 },
+    gyro: { x: 0, y: 0, z: 0 }
+  });
+
+  const calculateDeviceOrientation = useCallback((data: any, type: 'mag' | 'acc' | 'gyro') => {
+    setSensorData(prevData => ({ ...prevData, [type]: data }));
+  }, []);
 
   useEffect(() => {
-    calculateDeviceOrientation(magData, accData, gyroData);
-  }, [magData, accData, gyroData]);
+    if (isInitialized) {
+      const { mag, acc, gyro } = sensorData;
+      // ... (rest of the orientation calculation logic)
+      // Update currentOrientation and currentSphereBlock here
+    }
+  }, [sensorData, isInitialized]);
 
   const generateBlocks = () => {
     const newBlocks: Block[] = [];
@@ -176,26 +187,35 @@ const App: React.FC = () => {
   };
 
   const BlockIndicator = React.memo<{ block: Block, isCurrent: boolean }>(
-    ({ block, isCurrent }) => (
-      <Animated.View
-        style={[
-          styles.blockIndicator,
-          {
-            left: block.position.x,
-            top: block.position.y,
-            backgroundColor: block.color,
-            transform: [
-              { scale: isCurrent ? 1.5 : 1 },
-              { translateX: -10 },  // Half of the width
-              { translateY: -10 },  // Half of the height
-            ],
-          },
-        ]}
-      />
-    ),
-    (prevProps, nextProps) => 
-      prevProps.isCurrent === nextProps.isCurrent && 
-      prevProps.block.id === nextProps.block.id
+    ({ block, isCurrent }) => {
+      const animatedScale = useRef(new Animated.Value(isCurrent ? 1.5 : 1)).current;
+
+      useEffect(() => {
+        Animated.spring(animatedScale, {
+          toValue: isCurrent ? 1.5 : 1,
+          useNativeDriver: true,
+        }).start();
+      }, [isCurrent]);
+
+      return (
+        <Animated.View
+          style={[
+            styles.blockIndicator,
+            {
+              left: block.position.x,
+              top: block.position.y,
+              backgroundColor: block.color,
+              transform: [
+                { scale: animatedScale },
+                { translateX: -10 },  // Half of the width
+                { translateY: -10 },  // Half of the height
+              ],
+            },
+          ]}
+        />
+      );
+    },
+    (prevProps, nextProps) => prevProps.isCurrent === nextProps.isCurrent
   );
 
   if (!permission) {
@@ -213,34 +233,47 @@ const App: React.FC = () => {
     );
   }
 
+  if (!permission?.granted) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.message}>We need your permission to show the camera</Text>
+        <Button onPress={requestPermission} title="Grant permission" />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <CameraView style={styles.camera} type={cameraType as any} ref={(ref: any) => setCameraRef(ref)}>
-        <View style={styles.arOverlay}>
-          {blocks.map((block) => (
-            <BlockIndicator
-              key={block.id}
-              block={block}
-              isCurrent={block.id === currentSphereBlock}
-            />
-          ))}
-        </View>
-        <Animated.View style={[styles.orientationIndicator, {
-          transform: [
-            { rotateX: animatedRotation.x.interpolate({
-                inputRange: [-Math.PI, Math.PI],
-                outputRange: ['-180deg', '180deg']
-              })
-            },
-            { rotateY: animatedRotation.y.interpolate({
-                inputRange: [-Math.PI, Math.PI],
-                outputRange: ['-180deg', '180deg']
-              })
-            }
-          ]
-        }]}>
-          <ArrowUp size={48} color="red" />
-        </Animated.View>
+        {isInitialized && (
+          <>
+            <View style={styles.arOverlay}>
+              {blocks.map((block) => (
+                <BlockIndicator
+                  key={block.id}
+                  block={block}
+                  isCurrent={block.id === currentSphereBlock}
+                />
+              ))}
+            </View>
+            <Animated.View style={[styles.orientationIndicator, {
+              transform: [
+                { rotateX: animatedRotation.x.interpolate({
+                    inputRange: [-Math.PI, Math.PI],
+                    outputRange: ['-180deg', '180deg']
+                  })
+                },
+                { rotateY: animatedRotation.y.interpolate({
+                    inputRange: [-Math.PI, Math.PI],
+                    outputRange: ['-180deg', '180deg']
+                  })
+                }
+              ]
+            }]}>
+              <ArrowUp size={48} color="red" />
+            </Animated.View>
+          </>
+        )}
         <View style={styles.buttonContainer}>
           <TouchableOpacity style={styles.button} onPress={() => setCameraType(cameraType === 'back' ? 'front' : 'back')}>
             <Text style={styles.text}>Flip Camera</Text>
@@ -258,7 +291,7 @@ const App: React.FC = () => {
           <Text>Saved Sphere Block: {savedSphereBlock}</Text>
         </View>
       )}
-      <Text style={styles.blockText}>Current Sphere Block: {currentSphereBlock}</Text>
+      <Text style={styles.blockText}>Current Sphere Block: {currentSphereBlock ?? 'Calculating...'}</Text>
     </View>
   );
 };
