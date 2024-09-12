@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, Button, Alert, TouchableOpacity, Animated, Easing } from 'react-native';
 import * as Location from 'expo-location';
 import { Magnetometer, Accelerometer, Gyroscope } from 'expo-sensors';
-import { Camera, CameraType } from 'expo-camera';
+import { Camera } from 'expo-camera';
 import { ArrowUp } from 'lucide-react';
 import * as THREE from 'three';
 
@@ -26,7 +26,7 @@ const App: React.FC = () => {
   const [isLocationSet, setIsLocationSet] = useState<boolean>(false);
   const [currentOrientation, setCurrentOrientation] = useState<THREE.Quaternion>(new THREE.Quaternion());
   const [currentSphereBlock, setCurrentSphereBlock] = useState<number>(0);
-  const [cameraType, setCameraType] = useState(CameraType.Back);
+  const [cameraType, setCameraType] = useState('back');
   const [permission, requestPermission] = Camera.useCameraPermissions();
   const [blocks, setBlocks] = useState<Block[]>([]);
   
@@ -230,7 +230,7 @@ const App: React.FC = () => {
           <ArrowUp size={48} color="red" />
         </Animated.View>
         <View style={styles.buttonContainer}>
-          <TouchableOpacity style={styles.button} onPress={() => setCameraType(cameraType === CameraType.Back ? CameraType.Front : CameraType.Back)}>
+          <TouchableOpacity style={styles.button} onPress={() => setCameraType(cameraType === 'back' ? 'front' : 'back')}>
             <Text style={styles.text}>Flip Camera</Text>
           </TouchableOpacity>
         </View>
