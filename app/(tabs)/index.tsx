@@ -5,9 +5,9 @@ import { Magnetometer } from 'expo-sensors';
 import { CameraView, CameraCapturedPicture, useCameraPermissions } from 'expo-camera';
 
 const SPHERE_SEGMENTS = 4; // 4x4 grid, resulting in 16 total segments
-const UPDATE_INTERVAL = 100; // More frequent updates for precision
-const MOVING_AVERAGE_WINDOW = 5; // Number of readings to average
-const DEBOUNCE_DELAY = 200; // Milliseconds to wait before updating state
+const UPDATE_INTERVAL = 500; // Less frequent updates (every 500ms)
+const MOVING_AVERAGE_WINDOW = 3; // Reduced number of readings to average
+const DEBOUNCE_DELAY = 1000; // Increased debounce delay (1 second)
 
 const App: React.FC = () => {
   const [cameraRef, setCameraRef] = useState<any>(null);
@@ -65,9 +65,18 @@ const App: React.FC = () => {
           console.log('Average reading:', { avgX, avgY, avgZ });
           const sphereBlock = calculateSphereBlock(avgX, avgY, avgZ);
           console.log('Calculated sphere block:', sphereBlock);
-          setCurrentSphereBlock(sphereBlock);
+          setCurrentSphereBlock(prevBlock => {
+            console.log('Updating sphere block from', prevBlock, 'to', sphereBlock);
+            return sphereBlock;
+          });
         }, DEBOUNCE_DELAY);
       });
+
+      // Start the magnetometer after a short delay
+      setTimeout(() => {
+        Magnetometer.setUpdateInterval(UPDATE_INTERVAL);
+        console.log('Magnetometer started with update interval:', UPDATE_INTERVAL);
+      }, 1000);
 
       // Check if Magnetometer is available
       const isMagnetometerAvailable = await Magnetometer.isAvailableAsync();
