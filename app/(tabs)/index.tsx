@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, Button, Alert, TouchableOpacity, Animated, Easing } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { StyleSheet, Text, View, Button, Alert, TouchableOpacity, Animated } from 'react-native';
 import * as Location from 'expo-location';
 import { Magnetometer, Accelerometer, Gyroscope } from 'expo-sensors';
 import { CameraView, CameraCapturedPicture, useCameraPermissions } from 'expo-camera';
@@ -8,8 +8,8 @@ import * as THREE from 'three';
 
 const LOCATION_TOLERANCE = 0.0001; // Roughly 10 meters
 const ORIENTATION_TOLERANCE = 0.1; // Tolerance for quaternion comparison
-const SMOOTHING_WINDOW_SIZE = 20; // Number of readings to consider for smoothing
-const UPDATE_INTERVAL = 100; // Update interval in milliseconds (reduced for smoother updates)
+const SMOOTHING_WINDOW_SIZE = 10; // Reduced number of readings for smoothing
+const UPDATE_INTERVAL = 200; // Increased update interval to reduce load
 const SPHERE_SEGMENTS = 16; // Number of segments to divide the sphere into
 
 interface Block {
@@ -49,23 +49,33 @@ const App: React.FC = () => {
       Accelerometer.setUpdateInterval(UPDATE_INTERVAL);
       Gyroscope.setUpdateInterval(UPDATE_INTERVAL);
 
-      const magnetSubscription = Magnetometer.addListener(magData => {
-        const accSubscription = Accelerometer.addListener(accData => {
-          const gyroSubscription = Gyroscope.addListener(gyroData => {
-            calculateDeviceOrientation(magData, accData, gyroData);
-            gyroSubscription.remove();
-          });
-          accSubscription.remove();
-        });
-      });
+      const subscriptions = [
+        Magnetometer.addListener(magData => {
+          setMagData(magData);
+        }),
+        Accelerometer.addListener(accData => {
+          setAccData(accData);
+        }),
+        Gyroscope.addListener(gyroData => {
+          setGyroData(gyroData);
+        })
+      ];
 
       generateBlocks();
 
       return () => {
-        magnetSubscription.remove();
+        subscriptions.forEach(subscription => subscription.remove());
       };
     })();
   }, [permission, requestPermission]);
+
+  const [magData, setMagData] = useState({ x: 0, y: 0, z: 0 });
+  const [accData, setAccData] = useState({ x: 0, y: 0, z: 0 });
+  const [gyroData, setGyroData] = useState({ x: 0, y: 0, z: 0 });
+
+  useEffect(() => {
+    calculateDeviceOrientation(magData, accData, gyroData);
+  }, [magData, accData, gyroData]);
 
   const generateBlocks = () => {
     const newBlocks: Block[] = [];
@@ -83,7 +93,7 @@ const App: React.FC = () => {
     setBlocks(newBlocks);
   };
 
-  const calculateDeviceOrientation = (magData: any, accData: any, gyroData: any) => {
+  const calculateDeviceOrientation = useCallback((magData: any, accData: any, gyroData: any) => {
     const { x: mx, y: my, z: mz } = magData;
     const { x: ax, y: ay, z: az } = accData;
     const { x: gx, y: gy, z: gz } = gyroData;
@@ -119,13 +129,8 @@ const App: React.FC = () => {
     setCurrentSphereBlock(sphereBlock);
     
     const euler = new THREE.Euler().setFromQuaternion(smoothedQuaternion);
-    Animated.timing(animatedRotation, {
-      toValue: { x: euler.x, y: euler.y },
-      duration: UPDATE_INTERVAL,
-      easing: Easing.linear,
-      useNativeDriver: true
-    }).start();
-  };
+    animatedRotation.setValue({ x: euler.x, y: euler.y });
+  }, []);
 
   const calculateSphereBlock = (quaternion: THREE.Quaternion): number => {
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion);
@@ -170,22 +175,27 @@ const App: React.FC = () => {
     }
   };
 
-  const BlockIndicator: React.FC<{ block: Block, isCurrent: boolean }> = ({ block, isCurrent }) => (
-    <Animated.View
-      style={[
-        styles.blockIndicator,
-        {
-          left: block.position.x,
-          top: block.position.y,
-          backgroundColor: block.color,
-          transform: [
-            { scale: isCurrent ? 1.5 : 1 },
-            { translateX: -10 },  // Half of the width
-            { translateY: -10 },  // Half of the height
-          ],
-        },
-      ]}
-    />
+  const BlockIndicator = React.memo<{ block: Block, isCurrent: boolean }>(
+    ({ block, isCurrent }) => (
+      <Animated.View
+        style={[
+          styles.blockIndicator,
+          {
+            left: block.position.x,
+            top: block.position.y,
+            backgroundColor: block.color,
+            transform: [
+              { scale: isCurrent ? 1.5 : 1 },
+              { translateX: -10 },  // Half of the width
+              { translateY: -10 },  // Half of the height
+            ],
+          },
+        ]}
+      />
+    ),
+    (prevProps, nextProps) => 
+      prevProps.isCurrent === nextProps.isCurrent && 
+      prevProps.block.id === nextProps.block.id
   );
 
   if (!permission) {
