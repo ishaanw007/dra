@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, Button, Alert, TouchableOpacity } from 'react-native';
 import * as Location from 'expo-location';
 import { Magnetometer } from 'expo-sensors';
-import { CameraView, CameraCapturedPicture, useCameraPermissions } from 'expo-camera';
+import { CameraView, CameraCapturedPicture, useCameraPermissions, CameraType } from 'expo-camera';
 
 const SPHERE_SEGMENTS = 4; // 4x4 grid, resulting in 16 total segments
 const UPDATE_INTERVAL = 100; // More frequent updates for testing
@@ -11,7 +11,7 @@ const App: React.FC = () => {
   const [cameraRef, setCameraRef] = useState<any>(null);
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [currentSphereBlock, setCurrentSphereBlock] = useState<string | null>(null);
-  const [cameraType, setCameraType] = useState<'back' | 'front'>('back');
+  const [cameraType, setCameraType] = useState<CameraView['props']['type']>('back');
   const [permission, requestPermission] = useCameraPermissions();
 
   useEffect(() => {
@@ -103,7 +103,11 @@ const App: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <CameraView style={styles.camera} type={cameraType as any} ref={(ref: any) => setCameraRef(ref)}>
+      <CameraView 
+        style={styles.camera} 
+        type={cameraType}
+        ref={(ref: React.RefObject<CameraView>) => setCameraRef(ref)}
+      >
         <View style={styles.buttonContainer}>
           <TouchableOpacity style={styles.button} onPress={() => setCameraType(cameraType === 'back' ? 'front' : 'back')}>
             <Text style={styles.text}>Flip Camera</Text>
