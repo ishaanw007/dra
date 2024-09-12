@@ -35,13 +35,13 @@ const App: React.FC = () => {
 
   useEffect(() => {
     (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
+      let { status: locationStatus } = await Location.requestForegroundPermissionsAsync();
+      if (locationStatus !== 'granted') {
         Alert.alert('Permission to access location was denied');
         return;
       }
 
-      const { status } = await Camera.requestCameraPermissionsAsync();
+      const { status: cameraStatus } = await Camera.requestCameraPermissionsAsync();
       setHasCameraPermission(status === 'granted');
 
       Magnetometer.setUpdateInterval(UPDATE_INTERVAL);
