@@ -53,6 +53,7 @@ const App: React.FC = () => {
 
       Magnetometer.addListener(data => {
         const { x, y, z } = data;
+        console.log('Magnetometer data:', { x, y, z });
         addMagnetometerReading([x, y, z]);
         
         if (debounceTimeoutRef.current) {
@@ -61,10 +62,20 @@ const App: React.FC = () => {
         
         debounceTimeoutRef.current = setTimeout(() => {
           const [avgX, avgY, avgZ] = getAverageReading();
+          console.log('Average reading:', { avgX, avgY, avgZ });
           const sphereBlock = calculateSphereBlock(avgX, avgY, avgZ);
+          console.log('Calculated sphere block:', sphereBlock);
           setCurrentSphereBlock(sphereBlock);
         }, DEBOUNCE_DELAY);
       });
+
+      // Check if Magnetometer is available
+      const isMagnetometerAvailable = await Magnetometer.isAvailableAsync();
+      console.log('Is Magnetometer available?', isMagnetometerAvailable);
+
+      if (!isMagnetometerAvailable) {
+        Alert.alert('Magnetometer not available', 'Your device does not have a magnetometer or it is not accessible.');
+      }
 
       // Get initial location
       let initialLocation = await Location.getCurrentPositionAsync({});
