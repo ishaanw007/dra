@@ -1,59 +1,20 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { StyleSheet, Text, View, Button, Alert, TouchableOpacity, Animated } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, Text, View, Button, Alert, TouchableOpacity } from 'react-native';
 import * as Location from 'expo-location';
-import { Magnetometer, Accelerometer, Gyroscope } from 'expo-sensors';
+import { Magnetometer } from 'expo-sensors';
 import { CameraView, CameraCapturedPicture, useCameraPermissions } from 'expo-camera';
-import { ArrowUp } from 'lucide-react-native';
-import * as THREE from 'three';
 
-const LOCATION_TOLERANCE = 0.0001; // Roughly 10 meters
-const ORIENTATION_TOLERANCE = 0.1; // Tolerance for quaternion comparison
-const SMOOTHING_WINDOW_SIZE = 5; // Further reduced number of readings for smoothing
-const UPDATE_INTERVAL = 100; // Decreased update interval for more responsive updates
-const SPHERE_SEGMENTS = 16; // Number of segments to divide the sphere into
-const INITIAL_STABILIZATION_TIME = 1000; // Time in ms to wait for initial sensor stabilization
-
-interface Block {
-  id: number;
-  color: string;
-  position: { x: number; y: number };
-}
+const SPHERE_SEGMENTS = 16;
+const UPDATE_INTERVAL = 100;
 
 const App: React.FC = () => {
   const [cameraRef, setCameraRef] = useState<any>(null);
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const [savedOrientation, setSavedOrientation] = useState<THREE.Quaternion | null>(null);
-  const [savedSphereBlock, setSavedSphereBlock] = useState<number | null>(null);
-  const [isLocationSet, setIsLocationSet] = useState<boolean>(false);
-  const [currentOrientation, setCurrentOrientation] = useState<THREE.Quaternion>(new THREE.Quaternion());
   const [currentSphereBlock, setCurrentSphereBlock] = useState<number | null>(null);
   const [cameraType, setCameraType] = useState<'back' | 'front'>('back');
   const [permission, requestPermission] = useCameraPermissions();
-  const [isInitialized, setIsInitialized] = useState<boolean>(false);
-  
-  const orientationReadings = useRef<THREE.Quaternion[]>([]);
-  const animatedRotation = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
-
-  const generateBlocks = (): Block[] => {
-    const newBlocks: Block[] = [];
-    for (let i = 0; i < SPHERE_SEGMENTS * SPHERE_SEGMENTS / 2; i++) {
-      const theta = (i % SPHERE_SEGMENTS) / SPHERE_SEGMENTS * Math.PI * 2;
-      const phi = Math.floor(i / SPHERE_SEGMENTS) / (SPHERE_SEGMENTS / 2) * Math.PI;
-      const x = Math.sin(phi) * Math.cos(theta);
-      const y = Math.cos(phi);
-      newBlocks.push({
-        id: i,
-        color: `hsl(${(i / (SPHERE_SEGMENTS * SPHERE_SEGMENTS / 2)) * 360}, 70%, 50%)`,
-        position: { x: x * 100 + 100, y: -y * 100 + 100 },
-      });
-    }
-    return newBlocks;
-  };
-
-  const blocks = useMemo(() => generateBlocks(), []);
 
   useEffect(() => {
-    let subscriptions: any[] = [];
     (async () => {
       let { status: locationStatus } = await Location.requestForegroundPermissionsAsync();
       if (locationStatus !== 'granted') {
@@ -66,173 +27,43 @@ const App: React.FC = () => {
       }
 
       Magnetometer.setUpdateInterval(UPDATE_INTERVAL);
-      Accelerometer.setUpdateInterval(UPDATE_INTERVAL);
-      Gyroscope.setUpdateInterval(UPDATE_INTERVAL);
 
-      // Wait for initial stabilization
-      await new Promise(resolve => setTimeout(resolve, INITIAL_STABILIZATION_TIME));
+      Magnetometer.addListener(data => {
+        const { x, y, z } = data;
+        const sphereBlock = calculateSphereBlock(x, y, z);
+        setCurrentSphereBlock(sphereBlock);
+      });
 
-      let magData = { x: 0, y: 0, z: 0 };
-      let accData = { x: 0, y: 0, z: 0 };
-      let gyroData = { x: 0, y: 0, z: 0 };
-
-      subscriptions = [
-        Magnetometer.addListener(data => { magData = data; }),
-        Accelerometer.addListener(data => { accData = data; }),
-        Gyroscope.addListener(data => { gyroData = data; })
-      ];
-
-      const updateInterval = setInterval(() => {
-        calculateDeviceOrientation(magData, accData, gyroData);
-      }, UPDATE_INTERVAL);
-
-      return () => {
-        subscriptions.forEach(subscription => subscription.remove());
-        clearInterval(updateInterval);
-      };
-
-      setIsInitialized(true);
+      // Get initial location
+      let initialLocation = await Location.getCurrentPositionAsync({});
+      setLocation(initialLocation);
     })();
 
     return () => {
-      subscriptions.forEach(subscription => subscription.remove());
+      Magnetometer.removeAllListeners();
     };
   }, [permission, requestPermission]);
 
-  const [sensorData, setSensorData] = useState({
-    mag: { x: 0, y: 0, z: 0 },
-    acc: { x: 0, y: 0, z: 0 },
-    gyro: { x: 0, y: 0, z: 0 }
-  });
-
-  const calculateDeviceOrientation = useCallback((magData: any, accData: any, gyroData: any) => {
-    const { x: mx, y: my, z: mz } = magData;
-    const { x: ax, y: ay, z: az } = accData;
-    const { x: gx, y: gy, z: gz } = gyroData;
-
-    const rotationMatrix = new THREE.Matrix4();
-    const quaternion = new THREE.Quaternion();
-
-    // Calculate rotation matrix from accelerometer data
-    const gravity = new THREE.Vector3(ax, ay, az).normalize();
-    const xAxis = new THREE.Vector3(my * gravity.z - mz * gravity.y, mz * gravity.x - mx * gravity.z, mx * gravity.y - my * gravity.x).normalize();
-    const yAxis = gravity.clone().cross(xAxis);
-
-    rotationMatrix.makeBasis(xAxis, yAxis, gravity);
-    quaternion.setFromRotationMatrix(rotationMatrix);
-
-    // Apply gyroscope data
-    const gyroQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(gx * UPDATE_INTERVAL / 1000, gy * UPDATE_INTERVAL / 1000, gz * UPDATE_INTERVAL / 1000));
-    quaternion.multiply(gyroQuaternion);
-
-    orientationReadings.current.push(quaternion);
-    if (orientationReadings.current.length > SMOOTHING_WINDOW_SIZE) {
-      orientationReadings.current.shift();
-    }
-
-    const smoothedQuaternion = new THREE.Quaternion();
-    for (const q of orientationReadings.current) {
-      smoothedQuaternion.multiply(q);
-    }
-    smoothedQuaternion.normalize();
-
-    setCurrentOrientation(smoothedQuaternion);
-    const sphereBlock = calculateSphereBlock(smoothedQuaternion);
-    setCurrentSphereBlock(sphereBlock);
-    
-    const euler = new THREE.Euler().setFromQuaternion(smoothedQuaternion);
-    animatedRotation.setValue({ x: euler.x, y: euler.y });
-  }, []);
-
-  const calculateSphereBlock = (quaternion: THREE.Quaternion): number => {
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion);
-    const spherical = new THREE.Spherical().setFromVector3(forward);
-    const thetaIndex = Math.floor((spherical.theta / Math.PI) * SPHERE_SEGMENTS / 2);
-    const phiIndex = Math.floor((spherical.phi / Math.PI) * SPHERE_SEGMENTS);
+  const calculateSphereBlock = (x: number, y: number, z: number): number => {
+    const theta = Math.atan2(y, x);
+    const phi = Math.atan2(Math.sqrt(x * x + y * y), z);
+    const thetaIndex = Math.floor(((theta + Math.PI) / (2 * Math.PI)) * SPHERE_SEGMENTS);
+    const phiIndex = Math.floor((phi / Math.PI) * SPHERE_SEGMENTS);
     return thetaIndex * SPHERE_SEGMENTS + phiIndex;
   };
 
   const setLocationAndOrientation = async () => {
-    let location = await Location.getCurrentPositionAsync({});
-    setLocation(location);
-    setSavedOrientation(currentOrientation);
-    setSavedSphereBlock(currentSphereBlock);
-    setIsLocationSet(true);
-    Alert.alert('Location and Orientation Set', `Latitude: ${location.coords.latitude.toFixed(6)}, Longitude: ${location.coords.longitude.toFixed(6)}, Sphere Block: ${currentSphereBlock}`);
+    let newLocation = await Location.getCurrentPositionAsync({});
+    setLocation(newLocation);
+    Alert.alert('Location and Orientation Set', `Latitude: ${newLocation.coords.latitude.toFixed(6)}, Longitude: ${newLocation.coords.longitude.toFixed(6)}, Sphere Block: ${currentSphereBlock}`);
   };
 
   const takePhoto = async () => {
-    if (cameraRef && isLocationSet) {
-      let currentLocation = await Location.getCurrentPositionAsync({});
-
-      const isLocationMatched = 
-        Math.abs(currentLocation.coords.latitude - location!.coords.latitude) <= LOCATION_TOLERANCE &&
-        Math.abs(currentLocation.coords.longitude - location!.coords.longitude) <= LOCATION_TOLERANCE;
-
-      const isOrientationMatched = 
-        Math.abs(1 - currentOrientation.dot(savedOrientation!)) <= ORIENTATION_TOLERANCE &&
-        currentSphereBlock === savedSphereBlock;
-
-      if (isLocationMatched && isOrientationMatched) {
-        let photo: CameraCapturedPicture = await cameraRef.takePictureAsync();
-        Alert.alert('Photo Taken', `Photo saved to: ${photo.uri}`);
-      } else {
-        let mismatchReasons = [];
-        if (!isLocationMatched) mismatchReasons.push('location');
-        if (!isOrientationMatched) mismatchReasons.push('orientation');
-        Alert.alert('Cannot Take Photo', `Mismatch in ${mismatchReasons.join(' and ')}. Please adjust and try again.`);
-      }
-    } else {
-      Alert.alert('Location Not Set', 'Please set the location and orientation first.');
+    if (cameraRef) {
+      let photo: CameraCapturedPicture = await cameraRef.takePictureAsync();
+      Alert.alert('Photo Taken', `Photo saved to: ${photo.uri}`);
     }
   };
-
-  const BlockIndicator = React.memo<{ block: Block, isCurrent: boolean }>(
-    ({ block, isCurrent }) => {
-      const animatedScale = useRef(new Animated.Value(isCurrent ? 1.5 : 1)).current;
-
-      useEffect(() => {
-        Animated.spring(animatedScale, {
-          toValue: isCurrent ? 1.5 : 1,
-          useNativeDriver: true,
-        }).start();
-      }, [isCurrent]);
-
-      return (
-        <Animated.View
-          style={[
-            styles.blockIndicator,
-            {
-              left: block.position.x,
-              top: block.position.y,
-              backgroundColor: block.color,
-              transform: [
-                { scale: animatedScale },
-                { translateX: -10 },  // Half of the width
-                { translateY: -10 },  // Half of the height
-              ],
-            },
-          ]}
-        />
-      );
-    },
-    (prevProps, nextProps) => prevProps.isCurrent === nextProps.isCurrent
-  );
-
-  if (!permission) {
-    // Camera permissions are still loading
-    return <View />;
-  }
-
-  if (!permission.granted) {
-    // Camera permissions are not granted yet
-    return (
-      <View style={styles.container}>
-        <Text style={styles.message}>We need your permission to show the camera</Text>
-        <Button onPress={requestPermission} title="Grant permission" />
-      </View>
-    );
-  }
 
   if (!permission?.granted) {
     return (
@@ -246,35 +77,6 @@ const App: React.FC = () => {
   return (
     <View style={styles.container}>
       <CameraView style={styles.camera} type={cameraType as any} ref={(ref: any) => setCameraRef(ref)}>
-        {isInitialized && (
-          <>
-            <View style={styles.arOverlay}>
-              {blocks.map((block) => (
-                <BlockIndicator
-                  key={block.id}
-                  block={block}
-                  isCurrent={block.id === currentSphereBlock}
-                />
-              ))}
-            </View>
-            <Animated.View style={[styles.orientationIndicator, {
-              transform: [
-                { rotateX: animatedRotation.x.interpolate({
-                    inputRange: [-Math.PI, Math.PI],
-                    outputRange: ['-180deg', '180deg']
-                  })
-                },
-                { rotateY: animatedRotation.y.interpolate({
-                    inputRange: [-Math.PI, Math.PI],
-                    outputRange: ['-180deg', '180deg']
-                  })
-                }
-              ]
-            }]}>
-              <ArrowUp size={48} color="red" />
-            </Animated.View>
-          </>
-        )}
         <View style={styles.buttonContainer}>
           <TouchableOpacity style={styles.button} onPress={() => setCameraType(cameraType === 'back' ? 'front' : 'back')}>
             <Text style={styles.text}>Flip Camera</Text>
@@ -285,14 +87,11 @@ const App: React.FC = () => {
         <Button title="Set Location and Orientation" onPress={setLocationAndOrientation} />
         <Button title="Take Photo" onPress={takePhoto} />
       </View>
-      {isLocationSet && location && (
-        <View>
-          <Text>Saved Latitude: {location.coords.latitude.toFixed(6)}</Text>
-          <Text>Saved Longitude: {location.coords.longitude.toFixed(6)}</Text>
-          <Text>Saved Sphere Block: {savedSphereBlock}</Text>
-        </View>
-      )}
-      <Text style={styles.blockText}>Current Sphere Block: {currentSphereBlock ?? 'Calculating...'}</Text>
+      <View style={styles.infoContainer}>
+        <Text>Current Latitude: {location?.coords.latitude.toFixed(6) ?? 'N/A'}</Text>
+        <Text>Current Longitude: {location?.coords.longitude.toFixed(6) ?? 'N/A'}</Text>
+        <Text>Current Sphere Block: {currentSphereBlock ?? 'Calculating...'}</Text>
+      </View>
     </View>
   );
 };
@@ -328,29 +127,8 @@ const styles = StyleSheet.create({
   controlsContainer: {
     padding: 20,
   },
-  orientationIndicator: {
-    position: 'absolute',
-    top: 20,
-    left: 20,
-  },
-  arOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  blockIndicator: {
-    position: 'absolute',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: 'white',
-  },
-  blockText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    padding: 10,
+  infoContainer: {
+    padding: 20,
     backgroundColor: 'rgba(255, 255, 255, 0.7)',
   },
 });
