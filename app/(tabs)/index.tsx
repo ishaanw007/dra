@@ -56,11 +56,24 @@ const App: React.FC = () => {
       // Wait for initial stabilization
       await new Promise(resolve => setTimeout(resolve, INITIAL_STABILIZATION_TIME));
 
+      let magData = { x: 0, y: 0, z: 0 };
+      let accData = { x: 0, y: 0, z: 0 };
+      let gyroData = { x: 0, y: 0, z: 0 };
+
       subscriptions = [
-        Magnetometer.addListener(magData => calculateDeviceOrientation(magData, 'mag')),
-        Accelerometer.addListener(accData => calculateDeviceOrientation(accData, 'acc')),
-        Gyroscope.addListener(gyroData => calculateDeviceOrientation(gyroData, 'gyro'))
+        Magnetometer.addListener(data => { magData = data; }),
+        Accelerometer.addListener(data => { accData = data; }),
+        Gyroscope.addListener(data => { gyroData = data; })
       ];
+
+      const updateInterval = setInterval(() => {
+        calculateDeviceOrientation(magData, accData, gyroData);
+      }, UPDATE_INTERVAL);
+
+      return () => {
+        subscriptions.forEach(subscription => subscription.remove());
+        clearInterval(updateInterval);
+      };
 
       setIsInitialized(true);
     })();
@@ -75,34 +88,6 @@ const App: React.FC = () => {
     acc: { x: 0, y: 0, z: 0 },
     gyro: { x: 0, y: 0, z: 0 }
   });
-
-  const calculateDeviceOrientation = useCallback((data: any, type: 'mag' | 'acc' | 'gyro') => {
-    setSensorData(prevData => ({ ...prevData, [type]: data }));
-  }, []);
-
-  useEffect(() => {
-    if (isInitialized) {
-      const { mag, acc, gyro } = sensorData;
-      // ... (rest of the orientation calculation logic)
-      // Update currentOrientation and currentSphereBlock here
-    }
-  }, [sensorData, isInitialized]);
-
-  const generateBlocks = () => {
-    const newBlocks: Block[] = [];
-    for (let i = 0; i < SPHERE_SEGMENTS * SPHERE_SEGMENTS / 2; i++) {
-      const theta = (i % SPHERE_SEGMENTS) / SPHERE_SEGMENTS * Math.PI * 2;
-      const phi = Math.floor(i / SPHERE_SEGMENTS) / (SPHERE_SEGMENTS / 2) * Math.PI;
-      const x = Math.sin(phi) * Math.cos(theta);
-      const y = Math.cos(phi);
-      newBlocks.push({
-        id: i,
-        color: `hsl(${(i / (SPHERE_SEGMENTS * SPHERE_SEGMENTS / 2)) * 360}, 70%, 50%)`,
-        position: { x: x * 100 + 100, y: -y * 100 + 100 },
-      });
-    }
-    setBlocks(newBlocks);
-  };
 
   const calculateDeviceOrientation = useCallback((magData: any, accData: any, gyroData: any) => {
     const { x: mx, y: my, z: mz } = magData;
