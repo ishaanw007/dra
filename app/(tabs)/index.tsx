@@ -27,7 +27,6 @@ const App: React.FC = () => {
   const [currentOrientation, setCurrentOrientation] = useState<THREE.Quaternion>(new THREE.Quaternion());
   const [currentSphereBlock, setCurrentSphereBlock] = useState<number>(0);
   const [cameraType, setCameraType] = useState('back');
-  const [permission, requestPermission] = Camera.useCameraPermissions();
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [blocks, setBlocks] = useState<Block[]>([]);
   
@@ -42,8 +41,8 @@ const App: React.FC = () => {
         return;
       }
 
-      const cameraStatus = await Camera.requestCameraPermissionsAsync();
-      setHasCameraPermission(cameraStatus.status === 'granted');
+      const { status } = await Camera.requestCameraPermissionsAsync();
+      setHasCameraPermission(status === 'granted');
 
       Magnetometer.setUpdateInterval(UPDATE_INTERVAL);
       Accelerometer.setUpdateInterval(UPDATE_INTERVAL);
