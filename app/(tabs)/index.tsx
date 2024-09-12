@@ -5,7 +5,9 @@ import { Magnetometer } from 'expo-sensors';
 import { CameraView, CameraCapturedPicture, useCameraPermissions } from 'expo-camera';
 
 const SPHERE_SEGMENTS = 4; // 4x4 grid, resulting in 16 total segments
-const UPDATE_INTERVAL = 100;
+const UPDATE_INTERVAL = 50; // More frequent updates for precision
+const MOVING_AVERAGE_WINDOW = 5; // Number of readings to average
+const DEBOUNCE_DELAY = 200; // Milliseconds to wait before updating state
 
 const App: React.FC = () => {
   const [cameraRef, setCameraRef] = useState<any>(null);
@@ -13,6 +15,27 @@ const App: React.FC = () => {
   const [currentSphereBlock, setCurrentSphereBlock] = useState<string | null>(null);
   const [cameraType, setCameraType] = useState<'back' | 'front'>('back');
   const [permission, requestPermission] = useCameraPermissions();
+  const [magnetometerReadings, setMagnetometerReadings] = useState<number[][]>([]);
+  const debounceTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  const addMagnetometerReading = (reading: number[]) => {
+    setMagnetometerReadings(prevReadings => {
+      const newReadings = [...prevReadings, reading];
+      if (newReadings.length > MOVING_AVERAGE_WINDOW) {
+        return newReadings.slice(-MOVING_AVERAGE_WINDOW);
+      }
+      return newReadings;
+    });
+  };
+
+  const getAverageReading = () => {
+    if (magnetometerReadings.length === 0) return [0, 0, 0];
+    const sum = magnetometerReadings.reduce(
+      (acc, reading) => [acc[0] + reading[0], acc[1] + reading[1], acc[2] + reading[2]],
+      [0, 0, 0]
+    );
+    return sum.map(value => value / magnetometerReadings.length);
+  };
 
   useEffect(() => {
     (async () => {
@@ -30,8 +53,17 @@ const App: React.FC = () => {
 
       Magnetometer.addListener(data => {
         const { x, y, z } = data;
-        const sphereBlock = calculateSphereBlock(x, y, z);
-        setCurrentSphereBlock(sphereBlock);
+        addMagnetometerReading([x, y, z]);
+        
+        if (debounceTimeoutRef.current) {
+          clearTimeout(debounceTimeoutRef.current);
+        }
+        
+        debounceTimeoutRef.current = setTimeout(() => {
+          const [avgX, avgY, avgZ] = getAverageReading();
+          const sphereBlock = calculateSphereBlock(avgX, avgY, avgZ);
+          setCurrentSphereBlock(sphereBlock);
+        }, DEBOUNCE_DELAY);
       });
 
       // Get initial location
@@ -41,6 +73,9 @@ const App: React.FC = () => {
 
     return () => {
       Magnetometer.removeAllListeners();
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
     };
   }, [permission, requestPermission]);
 
