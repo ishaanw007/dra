@@ -4,13 +4,13 @@ import * as Location from 'expo-location';
 import { Magnetometer } from 'expo-sensors';
 import { CameraView, CameraCapturedPicture, useCameraPermissions } from 'expo-camera';
 
-const SPHERE_SEGMENTS = 16;
+const SPHERE_SEGMENTS = 4; // 4x4 grid, resulting in 16 total segments
 const UPDATE_INTERVAL = 100;
 
 const App: React.FC = () => {
   const [cameraRef, setCameraRef] = useState<any>(null);
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const [currentSphereBlock, setCurrentSphereBlock] = useState<number | null>(null);
+  const [currentSphereBlock, setCurrentSphereBlock] = useState<string | null>(null);
   const [cameraType, setCameraType] = useState<'back' | 'front'>('back');
   const [permission, requestPermission] = useCameraPermissions();
 
@@ -44,16 +44,26 @@ const App: React.FC = () => {
     };
   }, [permission, requestPermission]);
 
-  const calculateSphereBlock = (x: number, y: number, z: number): number => {
+  const calculateSphereBlock = (x: number, y: number, z: number): string => {
     // Calculate the azimuth angle (theta) in the x-y plane
     const theta = Math.atan2(y, x);
     
-    // Convert theta from radians to degrees and normalize to 0-360 range
-    let degrees = (theta * 180 / Math.PI + 360) % 360;
+    // Calculate the elevation angle (phi)
+    const phi = Math.atan2(z, Math.sqrt(x * x + y * y));
     
-    // Divide the 360 degrees into SPHERE_SEGMENTS equal parts
-    // and return the index of the current segment (0 to SPHERE_SEGMENTS-1)
-    return Math.floor(degrees / (360 / SPHERE_SEGMENTS));
+    // Convert angles to degrees and normalize
+    let azimuth = (theta * 180 / Math.PI + 360) % 360;
+    let elevation = (phi * 180 / Math.PI + 90); // Elevation from -90 to 90 degrees
+    
+    // Calculate horizontal and vertical indices
+    const horizontalIndex = Math.floor(azimuth / (360 / SPHERE_SEGMENTS));
+    const verticalIndex = Math.floor(elevation / (180 / SPHERE_SEGMENTS));
+    
+    // Convert indices to letters and numbers
+    const horizontalLabel = String.fromCharCode(65 + horizontalIndex); // A, B, C, D
+    const verticalLabel = verticalIndex + 1; // 1, 2, 3, 4
+    
+    return `${horizontalLabel}${verticalLabel}`;
   };
 
   const setLocationAndOrientation = async () => {
@@ -95,6 +105,8 @@ const App: React.FC = () => {
         <Text>Current Latitude: {location?.coords.latitude.toFixed(6) ?? 'N/A'}</Text>
         <Text>Current Longitude: {location?.coords.longitude.toFixed(6) ?? 'N/A'}</Text>
         <Text>Current Sphere Block: {currentSphereBlock ?? 'Calculating...'}</Text>
+        <Text>Horizontal: {currentSphereBlock ? currentSphereBlock[0] : 'N/A'} (A=Front, C=Back)</Text>
+        <Text>Vertical: {currentSphereBlock ? currentSphereBlock[1] : 'N/A'} (1=Bottom, 4=Top)</Text>
       </View>
     </View>
   );
