@@ -45,11 +45,15 @@ const App: React.FC = () => {
   }, [permission, requestPermission]);
 
   const calculateSphereBlock = (x: number, y: number, z: number): number => {
+    // Calculate the azimuth angle (theta) in the x-y plane
     const theta = Math.atan2(y, x);
-    const phi = Math.atan2(Math.sqrt(x * x + y * y), z);
-    const thetaIndex = Math.floor(((theta + Math.PI) / (2 * Math.PI)) * SPHERE_SEGMENTS);
-    const phiIndex = Math.floor((phi / Math.PI) * SPHERE_SEGMENTS);
-    return thetaIndex * SPHERE_SEGMENTS + phiIndex;
+    
+    // Convert theta from radians to degrees and normalize to 0-360 range
+    let degrees = (theta * 180 / Math.PI + 360) % 360;
+    
+    // Divide the 360 degrees into SPHERE_SEGMENTS equal parts
+    // and return the index of the current segment (0 to SPHERE_SEGMENTS-1)
+    return Math.floor(degrees / (360 / SPHERE_SEGMENTS));
   };
 
   const setLocationAndOrientation = async () => {
