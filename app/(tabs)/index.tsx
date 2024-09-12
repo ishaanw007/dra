@@ -3,7 +3,7 @@ import { StyleSheet, Text, View, Button, Alert, TouchableOpacity, Animated, Easi
 import * as Location from 'expo-location';
 import { Magnetometer, Accelerometer, Gyroscope } from 'expo-sensors';
 import { Camera, CameraType } from 'expo-camera';
-import { ArrowUp } from 'lucide-react-native';
+import ArrowUp from 'lucide-react-native/dist/esm/icons/arrow-up';
 import * as THREE from 'three';
 
 const LOCATION_TOLERANCE = 0.0001; // Roughly 10 meters
