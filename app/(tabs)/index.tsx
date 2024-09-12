@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, Button, Alert, TouchableOpacity, Animated, Easing } from 'react-native';
 import * as Location from 'expo-location';
 import { Magnetometer, Accelerometer, Gyroscope } from 'expo-sensors';
-import { Camera } from 'expo-camera';
+import { Camera, CameraType } from 'expo-camera';
 import { ArrowUp } from 'lucide-react';
 import * as THREE from 'three';
 
@@ -28,6 +28,7 @@ const App: React.FC = () => {
   const [currentSphereBlock, setCurrentSphereBlock] = useState<number>(0);
   const [cameraType, setCameraType] = useState('back');
   const [permission, requestPermission] = Camera.useCameraPermissions();
+  const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [blocks, setBlocks] = useState<Block[]>([]);
   
   const orientationReadings = useRef<THREE.Quaternion[]>([]);
@@ -41,13 +42,8 @@ const App: React.FC = () => {
         return;
       }
 
-      if (!permission) {
-        return;
-      }
-
-      if (!permission.granted) {
-        await requestPermission();
-      }
+      const cameraStatus = await Camera.requestCameraPermissionsAsync();
+      setHasCameraPermission(cameraStatus.status === 'granted');
 
       Magnetometer.setUpdateInterval(UPDATE_INTERVAL);
       Accelerometer.setUpdateInterval(UPDATE_INTERVAL);
@@ -69,7 +65,7 @@ const App: React.FC = () => {
         magnetSubscription.remove();
       };
     })();
-  }, [permission, requestPermission]);
+  }, []);
 
   const generateBlocks = () => {
     const newBlocks: Block[] = [];
@@ -192,13 +188,11 @@ const App: React.FC = () => {
     />
   );
 
-  if (!permission?.granted) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.message}>We need your permission to show the camera</Text>
-        <Button onPress={requestPermission} title="Grant permission" />
-      </View>
-    );
+  if (hasCameraPermission === null) {
+    return <View />;
+  }
+  if (hasCameraPermission === false) {
+    return <Text>No access to camera</Text>;
   }
 
   return (
