@@ -21,7 +21,10 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.modernyogi.Dra"
+      "package": "com.modernyogi.Dra",
+      "permissions": [
+        "HIGH_SAMPLING_RATE_SENSORS"
+      ]
     },
     "web": {
       "bundler": "metro",
