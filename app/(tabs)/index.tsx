@@ -27,6 +27,10 @@ const TOLERANCE = {
   longitude: 0.0001, // degrees (~11 meters)
 };
 
+interface CameraProps {
+  takePictureAsync: () => Promise<{ uri: string }>;
+}
+
 interface Orientation {
   azimuth: number;
   pitch: number;
@@ -51,8 +55,6 @@ const App: React.FC = () => {
 
   const accelerometerData = useRef({ x: 0, y: 0, z: 0 });
   const magnetometerData = useRef({ x: 0, y: 0, z: 0 });
-
-  //const cameraRef = useRef<Camera>(null);
 
   useEffect(() => {
     const requestPermissions = async () => {
@@ -193,39 +195,37 @@ const App: React.FC = () => {
   const takePhoto = async () => {
     await getCurrentLocation();
 
-    if (Camera.current) {
-      try {
-        const photo = await Camera.current.takePictureAsync();
+    try {
+      const photo = await Camera.takePictureAsync();
 
-        if (!storedOrientation || !storedLocation) {
-          // Store current orientation and location
-          setStoredOrientation(orientation);
-          setStoredLocation(location);
+      if (!storedOrientation || !storedLocation) {
+        // Store current orientation and location
+        setStoredOrientation(orientation);
+        setStoredLocation(location);
 
-          Alert.alert(
-            'First Photo Taken',
-            `Photo saved to: ${photo.uri}\nOrientation and location data stored for comparison.`
-          );
-        } else {
-          // Compare current orientation and location with stored data
-          const orientationMatch = compareOrientation(
-            orientation!,
-            storedOrientation
-          );
-          const locationMatch = compareLocation(location!, storedLocation);
+        Alert.alert(
+          'First Photo Taken',
+          `Photo saved to: ${photo.uri}\nOrientation and location data stored for comparison.`
+        );
+      } else {
+        // Compare current orientation and location with stored data
+        const orientationMatch = compareOrientation(
+          orientation!,
+          storedOrientation
+        );
+        const locationMatch = compareLocation(location!, storedLocation);
 
-          const matchMessage = `Orientation Match: ${
-            orientationMatch ? '✅' : '❌'
-          }\nLocation Match: ${locationMatch ? '✅' : '❌'}`;
+        const matchMessage = `Orientation Match: ${
+          orientationMatch ? '✅' : '❌'
+        }\nLocation Match: ${locationMatch ? '✅' : '❌'}`;
 
-          Alert.alert(
-            'Second Photo Taken',
-            `Photo saved to: ${photo.uri}\n\n${matchMessage}`
-          );
-        }
-      } catch (error) {
-        console.log('Camera error:', error);
+        Alert.alert(
+          'Second Photo Taken',
+          `Photo saved to: ${photo.uri}\n\n${matchMessage}`
+        );
       }
+    } catch (error) {
+      console.log('Camera error:', error);
     }
   };
 
