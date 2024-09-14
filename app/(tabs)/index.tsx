@@ -74,7 +74,7 @@ const App: React.FC = () => {
     let accelerometerSubscription: any;
     let magnetometerSubscription: any;
 
-    if (hasCameraPermission && hasLocationPermission) {
+    if (cameraPermission?.granted && hasLocationPermission) {
       // Set sensor update intervals
       setUpdateIntervalForType(SensorTypes.accelerometer, UPDATE_INTERVAL);
       setUpdateIntervalForType(SensorTypes.magnetometer, UPDATE_INTERVAL);
@@ -110,7 +110,7 @@ const App: React.FC = () => {
       accelerometerSubscription && accelerometerSubscription.unsubscribe();
       magnetometerSubscription && magnetometerSubscription.unsubscribe();
     };
-  }, [hasCameraPermission, hasLocationPermission]);
+  }, [cameraPermission?.granted, hasLocationPermission]);
 
   const computeOrientation = () => {
     const { x: ax, y: ay, z: az } = accelerometerData.current;
