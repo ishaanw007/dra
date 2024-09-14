@@ -39,7 +39,7 @@ interface LocationData {
 }
 
 const App: React.FC = () => {
-  const [facing, setFacing] = useState<CameraType>(CameraType.back);
+  const [facing, setFacing] = useState<CameraType>('back');
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [hasLocationPermission, setHasLocationPermission] = useState<boolean | null>(null);
 
