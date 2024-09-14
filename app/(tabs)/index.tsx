@@ -300,7 +300,7 @@ const App: React.FC = () => {
     <View style={styles.container}>
       <CameraView
         style={styles.camera}
-        type={facing}
+        facing={facing}
       >
         <View style={styles.buttonContainer}>
           <TouchableOpacity style={styles.button} onPress={toggleCameraFacing}>
