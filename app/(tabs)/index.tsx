@@ -27,6 +27,8 @@ const TOLERANCE = {
   longitude: 0.0001, // degrees (~11 meters)
 };
 
+interface Photo extends CameraCapturedPicture {}
+
 interface Orientation {
   azimuth: number;
   pitch: number;
@@ -190,12 +192,7 @@ const App: React.FC = () => {
     }
 
     try {
-      const photo: CameraCapturedPicture | undefined = await cameraRef.current.takePictureAsync();
-
-      if (!photo) {
-        console.log('Failed to capture photo');
-        return;
-      }
+      const photo: Photo = await cameraRef.current.takePictureAsync();
 
       if (!storedOrientation || !storedLocation) {
         // Store current orientation and location
