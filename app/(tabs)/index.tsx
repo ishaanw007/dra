@@ -16,7 +16,7 @@ import {
   SensorTypes,
 } from 'react-native-sensors';
 import { map } from 'rxjs/operators';
-import { Camera, CameraView, CameraType } from 'expo-camera';
+import { Camera, CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 
 const UPDATE_INTERVAL = 100; // Update interval for sensors in milliseconds
 const TOLERANCE = {
@@ -44,7 +44,7 @@ interface LocationData {
 
 const App: React.FC = () => {
   const [facing, setFacing] = useState<CameraType>('back');
-  const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [hasLocationPermission, setHasLocationPermission] = useState<boolean | null>(null);
 
   const [location, setLocation] = useState<LocationData | null>(null);
@@ -58,17 +58,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const requestPermissions = async () => {
-      // Request Camera Permission
-      const { status: cameraStatus } = await Camera.requestCameraPermissionsAsync();
-      setHasCameraPermission(cameraStatus === 'granted');
-
       // Request Location Permission
       const { status: locationStatus } = await Location.requestForegroundPermissionsAsync();
       setHasLocationPermission(locationStatus === 'granted');
-
-      if (cameraStatus !== 'granted') {
-        Alert.alert('Permission to access camera was denied');
-      }
 
       if (locationStatus !== 'granted') {
         Alert.alert('Permission to access location was denied');
@@ -274,31 +266,32 @@ const App: React.FC = () => {
     );
   };
 
-  if (hasCameraPermission === null || hasLocationPermission === null) {
-    // Permissions are still loading.
+  if (!cameraPermission || hasLocationPermission === null) {
+    // Permissions are still loading
     return <View />;
   }
 
-  if (!hasCameraPermission || !hasLocationPermission) {
+  if (!cameraPermission.granted || !hasLocationPermission) {
     return (
       <View style={styles.container}>
         <Text style={styles.message}>
           We need your permission to access the camera and location
         </Text>
-        <Button
-          onPress={async () => {
-            const { status } = await Camera.requestCameraPermissionsAsync();
-            setHasCameraPermission(status === 'granted');
-          }}
-          title="Grant Camera Permission"
-        />
-        <Button
-          onPress={async () => {
-            const { status } = await Location.requestForegroundPermissionsAsync();
-            setHasLocationPermission(status === 'granted');
-          }}
-          title="Grant Location Permission"
-        />
+        {!cameraPermission.granted && (
+          <Button
+            onPress={requestCameraPermission}
+            title="Grant Camera Permission"
+          />
+        )}
+        {!hasLocationPermission && (
+          <Button
+            onPress={async () => {
+              const { status } = await Location.requestForegroundPermissionsAsync();
+              setHasLocationPermission(status === 'granted');
+            }}
+            title="Grant Location Permission"
+          />
+        )}
       </View>
     );
   }
@@ -307,7 +300,7 @@ const App: React.FC = () => {
     <View style={styles.container}>
       <CameraView
         style={styles.camera}
-        facing={facing}
+        type={facing}
       >
         <View style={styles.buttonContainer}>
           <TouchableOpacity style={styles.button} onPress={toggleCameraFacing}>
