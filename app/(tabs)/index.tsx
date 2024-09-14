@@ -190,7 +190,7 @@ const App: React.FC = () => {
     }
 
     try {
-      const photo = await cameraRef.current.takePictureAsync();
+      const photo: CameraCapturedPicture | undefined = await cameraRef.current.takePictureAsync();
 
       if (!photo) {
         console.log('Failed to capture photo');
