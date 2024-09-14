@@ -42,6 +42,7 @@
     "react-native-screens": "3.31.1",
     "react-native-sensors": "^7.3.6",
     "react-native-web": "~0.19.10",
+    "rxjs": "^7.8.1",
     "three": "^0.168.0"
   },
   "devDependencies": {
