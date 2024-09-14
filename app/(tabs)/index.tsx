@@ -51,7 +51,7 @@ const App: React.FC = () => {
 
   const accelerometerData = useRef({ x: 0, y: 0, z: 0 });
   const magnetometerData = useRef({ x: 0, y: 0, z: 0 });
-  const cameraRef = useRef<Camera>(null);
+  const cameraRef = useRef<Camera | null>(null);
 
   useEffect(() => {
     const requestPermissions = async () => {
