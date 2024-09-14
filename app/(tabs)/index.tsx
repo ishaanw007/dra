@@ -190,33 +190,37 @@ const App: React.FC = () => {
     }
 
     try {
-      const photo: CameraCapturedPicture = await cameraRef.current.takePictureAsync();
+      const photo = await cameraRef.current.takePictureAsync();
 
-      if (!storedOrientation || !storedLocation) {
-        // Store current orientation and location
-        setStoredOrientation(orientation);
-        setStoredLocation(location);
+      if (photo) {
+        if (!storedOrientation || !storedLocation) {
+          // Store current orientation and location
+          setStoredOrientation(orientation);
+          setStoredLocation(location);
 
-        Alert.alert(
-          'First Photo Taken',
-          `Photo saved to: ${photo.uri}\nOrientation and location data stored for comparison.`
-        );
+          Alert.alert(
+            'First Photo Taken',
+            `Photo saved to: ${photo.uri}\nOrientation and location data stored for comparison.`
+          );
+        } else {
+          // Compare current orientation and location with stored data
+          const orientationMatch = compareOrientation(
+            orientation!,
+            storedOrientation
+          );
+          const locationMatch = compareLocation(location!, storedLocation);
+
+          const matchMessage = `Orientation Match: ${
+            orientationMatch ? '✅' : '❌'
+          }\nLocation Match: ${locationMatch ? '✅' : '❌'}`;
+
+          Alert.alert(
+            'Second Photo Taken',
+            `Photo saved to: ${photo.uri}\n\n${matchMessage}`
+          );
+        }
       } else {
-        // Compare current orientation and location with stored data
-        const orientationMatch = compareOrientation(
-          orientation!,
-          storedOrientation
-        );
-        const locationMatch = compareLocation(location!, storedLocation);
-
-        const matchMessage = `Orientation Match: ${
-          orientationMatch ? '✅' : '❌'
-        }\nLocation Match: ${locationMatch ? '✅' : '❌'}`;
-
-        Alert.alert(
-          'Second Photo Taken',
-          `Photo saved to: ${photo.uri}\n\n${matchMessage}`
-        );
+        console.log('Failed to capture photo');
       }
     } catch (error) {
       console.log('Camera error:', error);
