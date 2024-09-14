@@ -16,7 +16,7 @@ import {
   SensorTypes,
 } from 'react-native-sensors';
 import { map } from 'rxjs/operators';
-import { Camera, CameraView, CameraType, useCameraPermissions, CameraCapturedPicture } from 'expo-camera';
+import { Camera as ExpoCamera, CameraView, CameraType, useCameraPermissions, CameraCapturedPicture } from 'expo-camera';
 
 const UPDATE_INTERVAL = 100; // Update interval for sensors in milliseconds
 const TOLERANCE = {
@@ -51,7 +51,7 @@ const App: React.FC = () => {
 
   const accelerometerData = useRef({ x: 0, y: 0, z: 0 });
   const magnetometerData = useRef({ x: 0, y: 0, z: 0 });
-  const cameraRef = useRef<Camera | null>(null);
+  const cameraRef = useRef<ExpoCamera | null>(null);
 
   useEffect(() => {
     const requestPermissions = async () => {
