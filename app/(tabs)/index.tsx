@@ -16,7 +16,7 @@ import {
   SensorTypes,
 } from 'react-native-sensors';
 import { map } from 'rxjs/operators';
-import { Camera, CameraView, CameraType, useCameraPermissions } from 'expo-camera';
+import { Camera, CameraView, CameraType, useCameraPermissions, CameraCapturedPicture } from 'expo-camera';
 
 const UPDATE_INTERVAL = 100; // Update interval for sensors in milliseconds
 const TOLERANCE = {
@@ -39,7 +39,7 @@ interface LocationData {
 }
 
 const App: React.FC = () => {
-  const [facing, setFacing] = useState<CameraType>('back');
+  const [facing, setFacing] = useState<CameraType>(CameraType.back);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [hasLocationPermission, setHasLocationPermission] = useState<boolean | null>(null);
 
@@ -51,7 +51,7 @@ const App: React.FC = () => {
 
   const accelerometerData = useRef({ x: 0, y: 0, z: 0 });
   const magnetometerData = useRef({ x: 0, y: 0, z: 0 });
-  const cameraRef = useRef<Camera | null>(null);
+  const cameraRef = useRef<Camera>(null);
 
   useEffect(() => {
     const requestPermissions = async () => {
@@ -190,7 +190,7 @@ const App: React.FC = () => {
     }
 
     try {
-      const photo = await cameraRef.current.takePictureAsync();
+      const photo: CameraCapturedPicture = await cameraRef.current.takePictureAsync();
 
       if (!storedOrientation || !storedLocation) {
         // Store current orientation and location
