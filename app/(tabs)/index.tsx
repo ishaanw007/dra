@@ -27,10 +27,6 @@ const TOLERANCE = {
   longitude: 0.0001, // degrees (~11 meters)
 };
 
-interface CameraProps {
-  takePictureAsync: () => Promise<{ uri: string }>;
-}
-
 interface Orientation {
   azimuth: number;
   pitch: number;
@@ -55,6 +51,7 @@ const App: React.FC = () => {
 
   const accelerometerData = useRef({ x: 0, y: 0, z: 0 });
   const magnetometerData = useRef({ x: 0, y: 0, z: 0 });
+  const cameraRef = useRef<Camera | null>(null);
 
   useEffect(() => {
     const requestPermissions = async () => {
@@ -187,8 +184,13 @@ const App: React.FC = () => {
   const takePhoto = async () => {
     await getCurrentLocation();
 
+    if (!cameraRef.current) {
+      console.log('Camera ref is not available');
+      return;
+    }
+
     try {
-      const photo = await Camera.takePictureAsync();
+      const photo = await cameraRef.current.takePictureAsync();
 
       if (!storedOrientation || !storedLocation) {
         // Store current orientation and location
@@ -301,6 +303,7 @@ const App: React.FC = () => {
       <CameraView
         style={styles.camera}
         facing={facing}
+        ref={cameraRef}
       >
         <View style={styles.buttonContainer}>
           <TouchableOpacity style={styles.button} onPress={toggleCameraFacing}>
