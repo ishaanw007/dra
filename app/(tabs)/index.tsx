@@ -6,28 +6,27 @@ import {
   Button,
   Alert,
   TouchableOpacity,
-  Platform,
 } from 'react-native';
 import * as Location from 'expo-location';
+import { Accelerometer, Magnetometer, Gyroscope } from 'expo-sensors';
 import {
-  accelerometer,
-  magnetometer,
-  setUpdateIntervalForType,
-  SensorTypes,
-} from 'react-native-sensors';
-import { map } from 'rxjs/operators';
-import { Camera as ExpoCamera, CameraView, CameraType, useCameraPermissions, CameraCapturedPicture } from 'expo-camera';
+  Camera,
+  CameraType,
+  CameraView,
+  useCameraPermissions,
+  CameraCapturedPicture,
+} from 'expo-camera';
+import KalmanFilter from 'kalmanjs';
+import { quat, mat3 } from 'gl-matrix';
 
 const UPDATE_INTERVAL = 100; // Update interval for sensors in milliseconds
 const TOLERANCE = {
   azimuth: 5, // degrees
-  pitch: 5,   // degrees
-  roll: 5,    // degrees
-  latitude: 0.0001,  // degrees (~11 meters)
+  pitch: 5, // degrees
+  roll: 5, // degrees
+  latitude: 0.0001, // degrees (~11 meters)
   longitude: 0.0001, // degrees (~11 meters)
 };
-
-interface Photo extends CameraCapturedPicture {}
 
 interface Orientation {
   azimuth: number;
@@ -53,7 +52,26 @@ const App: React.FC = () => {
 
   const accelerometerData = useRef({ x: 0, y: 0, z: 0 });
   const magnetometerData = useRef({ x: 0, y: 0, z: 0 });
-  const cameraRef = useRef<ExpoCamera | null>(null);
+  const gyroscopeData = useRef({ x: 0, y: 0, z: 0 });
+  const cameraRef = useRef<CameraView>(null);
+
+  // Initialize Kalman filters for accelerometer data
+  const kalmanFilterAx = useRef(new KalmanFilter({ R: 0.01, Q: 3 }));
+  const kalmanFilterAy = useRef(new KalmanFilter({ R: 0.01, Q: 3 }));
+  const kalmanFilterAz = useRef(new KalmanFilter({ R: 0.01, Q: 3 }));
+
+  // Initialize Kalman filters for magnetometer data
+  const kalmanFilterMx = useRef(new KalmanFilter({ R: 0.01, Q: 3 }));
+  const kalmanFilterMy = useRef(new KalmanFilter({ R: 0.01, Q: 3 }));
+  const kalmanFilterMz = useRef(new KalmanFilter({ R: 0.01, Q: 3 }));
+
+  // Initialize Kalman filters for gyroscope data
+  const kalmanFilterGx = useRef(new KalmanFilter({ R: 0.01, Q: 3 }));
+  const kalmanFilterGy = useRef(new KalmanFilter({ R: 0.01, Q: 3 }));
+  const kalmanFilterGz = useRef(new KalmanFilter({ R: 0.01, Q: 3 }));
+
+  const prevTimestamp = useRef<number | null>(null);
+  const orientationQuat = useRef<quat>(quat.create());
 
   useEffect(() => {
     const requestPermissions = async () => {
@@ -64,6 +82,11 @@ const App: React.FC = () => {
       if (locationStatus !== 'granted') {
         Alert.alert('Permission to access location was denied');
       }
+
+      // Request Camera Permission if not already granted
+      if (!cameraPermission) {
+        await requestCameraPermission();
+      }
     };
 
     requestPermissions();
@@ -72,57 +95,100 @@ const App: React.FC = () => {
   useEffect(() => {
     let accelerometerSubscription: any;
     let magnetometerSubscription: any;
+    let gyroscopeSubscription: any;
 
     if (cameraPermission?.granted && hasLocationPermission) {
       // Set sensor update intervals
-      setUpdateIntervalForType(SensorTypes.accelerometer, UPDATE_INTERVAL);
-      setUpdateIntervalForType(SensorTypes.magnetometer, UPDATE_INTERVAL);
+      Accelerometer.setUpdateInterval(UPDATE_INTERVAL);
+      Magnetometer.setUpdateInterval(UPDATE_INTERVAL);
+      Gyroscope.setUpdateInterval(UPDATE_INTERVAL);
 
       // Subscribe to accelerometer data
-      accelerometerSubscription = accelerometer
-        .pipe(map(({ x, y, z }) => ({ x, y, z })))
-        .subscribe(
-          (data) => {
-            accelerometerData.current = data;
-            computeOrientation();
-          },
-          (error) => {
-            console.log('Accelerometer error:', error);
-          }
-        );
+      accelerometerSubscription = Accelerometer.addListener((data) => {
+        // Apply Kalman filter to each axis
+        const filteredAx = kalmanFilterAx.current.filter(data.x);
+        const filteredAy = kalmanFilterAy.current.filter(data.y);
+        const filteredAz = kalmanFilterAz.current.filter(data.z);
+
+        accelerometerData.current = { x: filteredAx, y: filteredAy, z: filteredAz };
+        computeOrientation();
+      });
 
       // Subscribe to magnetometer data
-      magnetometerSubscription = magnetometer
-        .pipe(map(({ x, y, z }) => ({ x, y, z })))
-        .subscribe(
-          (data) => {
-            magnetometerData.current = data;
-            computeOrientation();
-          },
-          (error) => {
-            console.log('Magnetometer error:', error);
-          }
-        );
+      magnetometerSubscription = Magnetometer.addListener((data) => {
+        // Apply Kalman filter to each axis
+        const filteredMx = kalmanFilterMx.current.filter(data.x);
+        const filteredMy = kalmanFilterMy.current.filter(data.y);
+        const filteredMz = kalmanFilterMz.current.filter(data.z);
+
+        magnetometerData.current = { x: filteredMx, y: filteredMy, z: filteredMz };
+        computeOrientation();
+      });
+
+      // Subscribe to gyroscope data
+      gyroscopeSubscription = Gyroscope.addListener((data) => {
+        // Apply Kalman filter to each axis
+        const filteredGx = kalmanFilterGx.current.filter(data.x);
+        const filteredGy = kalmanFilterGy.current.filter(data.y);
+        const filteredGz = kalmanFilterGz.current.filter(data.z);
+
+        gyroscopeData.current = { x: filteredGx, y: filteredGy, z: filteredGz };
+        computeOrientation();
+      });
     }
 
     return () => {
-      accelerometerSubscription && accelerometerSubscription.unsubscribe();
-      magnetometerSubscription && magnetometerSubscription.unsubscribe();
+      accelerometerSubscription && accelerometerSubscription.remove();
+      magnetometerSubscription && magnetometerSubscription.remove();
+      gyroscopeSubscription && gyroscopeSubscription.remove();
     };
   }, [cameraPermission?.granted, hasLocationPermission]);
 
   const computeOrientation = () => {
+    const currentTime = Date.now();
+    let dt = 0;
+
+    if (prevTimestamp.current !== null) {
+      dt = (currentTime - prevTimestamp.current) / 1000; // in seconds
+    }
+    prevTimestamp.current = currentTime;
+
+    const { x: gx, y: gy, z: gz } = gyroscopeData.current;
+
+    if (dt > 0) {
+      const omegaMagnitude = Math.sqrt(gx * gx + gy * gy + gz * gz);
+
+      if (omegaMagnitude > 0) {
+        const thetaOverTwo = (omegaMagnitude * dt) / 2;
+        const sinThetaOverTwo = Math.sin(thetaOverTwo);
+        const cosThetaOverTwo = Math.cos(thetaOverTwo);
+
+        const deltaQuat = quat.create();
+        deltaQuat[0] = (gx / omegaMagnitude) * sinThetaOverTwo;
+        deltaQuat[1] = (gy / omegaMagnitude) * sinThetaOverTwo;
+        deltaQuat[2] = (gz / omegaMagnitude) * sinThetaOverTwo;
+        deltaQuat[3] = cosThetaOverTwo;
+
+        // Update orientation quaternion
+        quat.multiply(orientationQuat.current, orientationQuat.current, deltaQuat);
+        quat.normalize(orientationQuat.current, orientationQuat.current);
+      }
+    }
+
+    // Get accelerometer and magnetometer data
     const { x: ax, y: ay, z: az } = accelerometerData.current;
     const { x: mx, y: my, z: mz } = magnetometerData.current;
 
     // Normalize accelerometer vector
-    const normA = Math.sqrt(ax * ax + ay * ay + az * az);
+    let normA = Math.sqrt(ax * ax + ay * ay + az * az);
+    if (normA === 0) normA = 1e-6; // Prevent division by zero
     const axNorm = ax / normA;
     const ayNorm = ay / normA;
     const azNorm = az / normA;
 
     // Normalize magnetometer vector
-    const normM = Math.sqrt(mx * mx + my * my + mz * mz);
+    let normM = Math.sqrt(mx * mx + my * my + mz * mz);
+    if (normM === 0) normM = 1e-6; // Prevent division by zero
     const mxNorm = mx / normM;
     const myNorm = my / normM;
     const mzNorm = mz / normM;
@@ -133,12 +199,13 @@ const App: React.FC = () => {
     const hz = mxNorm * ayNorm - myNorm * axNorm;
 
     // Normalize the horizontal component
-    const normH = Math.sqrt(hx * hx + hy * hy + hz * hz);
+    let normH = Math.sqrt(hx * hx + hy * hy + hz * hz);
+    if (normH === 0) normH = 1e-6; // Prevent division by zero
     const hxNorm = hx / normH;
     const hyNorm = hy / normH;
     const hzNorm = hz / normH;
 
-    // Calculate the rotation matrix elements
+    // Rotation matrix elements
     const m11 = hxNorm;
     const m12 = hyNorm;
     const m13 = hzNorm;
@@ -149,24 +216,58 @@ const App: React.FC = () => {
     const m32 = ayNorm;
     const m33 = azNorm;
 
-    const rotationMatrix = [m11, m12, m13, m21, m22, m23, m31, m32, m33];
+    // Create rotation matrix in column-major order
+    const rotationMatrix = mat3.fromValues(
+      m11, m21, m31, // First column
+      m12, m22, m32, // Second column
+      m13, m23, m33  // Third column
+    );
 
-    // Compute orientation angles
-    const { azimuth, pitch, roll } = getOrientation(rotationMatrix);
-    setOrientation({ azimuth, pitch, roll });
+    // Compute absolute orientation quaternion from accelerometer and magnetometer data
+    const accelMagQuat = quat.create();
+    quat.fromMat3(accelMagQuat, rotationMatrix);
+    quat.normalize(accelMagQuat, accelMagQuat);
+
+    // Complementary filter to blend gyroscope and accelerometer/magnetometer data
+    const alpha = 0.98; // Adjust as needed (higher alpha favors gyroscope data)
+    quat.slerp(orientationQuat.current, orientationQuat.current, accelMagQuat, 1 - alpha);
+    quat.normalize(orientationQuat.current, orientationQuat.current);
+
+    // Convert quaternion to Euler angles
+    const { yaw, pitch, roll } = toEuler(orientationQuat.current);
+
+    // Update orientation state
+    setOrientation({ azimuth: yaw, pitch, roll });
   };
 
-  const getOrientation = (R: number[]): Orientation => {
-    let azimuth = Math.atan2(R[1], R[4]);
-    let pitch = Math.asin(-R[7]);
-    let roll = Math.atan2(-R[6], R[8]);
+  const toEuler = (q: quat) => {
+    const ysqr = q[1] * q[1];
+
+    // roll (x-axis rotation)
+    let t0 = +2.0 * (q[3] * q[0] + q[1] * q[2]);
+    let t1 = +1.0 - 2.0 * (q[0] * q[0] + ysqr);
+    let roll = Math.atan2(t0, t1);
+
+    // pitch (y-axis rotation)
+    let t2 = +2.0 * (q[3] * q[1] - q[2] * q[0]);
+    t2 = t2 > 1.0 ? 1.0 : t2;
+    t2 = t2 < -1.0 ? -1.0 : t2;
+    let pitch = Math.asin(t2);
+
+    // yaw (z-axis rotation)
+    let t3 = +2.0 * (q[3] * q[2] + q[0] * q[1]);
+    let t4 = +1.0 - 2.0 * (ysqr + q[2] * q[2]);
+    let yaw = Math.atan2(t3, t4);
 
     // Convert radians to degrees
-    azimuth = ((azimuth * 180) / Math.PI + 360) % 360;
-    pitch = (pitch * 180) / Math.PI;
-    roll = (roll * 180) / Math.PI;
+    roll = roll * (180 / Math.PI);
+    pitch = pitch * (180 / Math.PI);
+    yaw = yaw * (180 / Math.PI);
 
-    return { azimuth, pitch, roll };
+    // Normalize yaw to [0, 360)
+    yaw = (yaw + 360) % 360;
+
+    return { roll, pitch, yaw };
   };
 
   const getCurrentLocation = async () => {
@@ -192,7 +293,7 @@ const App: React.FC = () => {
     }
 
     try {
-      const photo: Photo = await cameraRef.current.takePictureAsync();
+      const photo: CameraCapturedPicture = await cameraRef.current.takePictureAsync();
 
       if (!storedOrientation || !storedLocation) {
         // Store current orientation and location
@@ -201,38 +302,26 @@ const App: React.FC = () => {
 
         Alert.alert(
           'First Photo Taken',
-          `Photo saved to: ${photo.uri}\nOrientation and location data stored for comparison.`
+          `Photo saved to: ${photo.uri}\nOrientation and location data stored for comparison.`,
         );
       } else {
         // Compare current orientation and location with stored data
-        const orientationMatch = compareOrientation(
-          orientation!,
-          storedOrientation
-        );
+        const orientationMatch = compareOrientation(orientation!, storedOrientation);
         const locationMatch = compareLocation(location!, storedLocation);
 
         const matchMessage = `Orientation Match: ${
           orientationMatch ? '✅' : '❌'
         }\nLocation Match: ${locationMatch ? '✅' : '❌'}`;
 
-        Alert.alert(
-          'Second Photo Taken',
-          `Photo saved to: ${photo.uri}\n\n${matchMessage}`
-        );
+        Alert.alert('Second Photo Taken', `Photo saved to: ${photo.uri}\n\n${matchMessage}`);
       }
     } catch (error) {
       console.log('Camera error:', error);
     }
   };
 
-  const compareOrientation = (
-    current: Orientation,
-    stored: Orientation
-  ): boolean => {
-    const azimuthDifference = angleDifference(
-      current.azimuth,
-      stored.azimuth
-    );
+  const compareOrientation = (current: Orientation, stored: Orientation): boolean => {
+    const azimuthDifference = angleDifference(current.azimuth, stored.azimuth);
     const pitchDifference = Math.abs(current.pitch - stored.pitch);
     const rollDifference = Math.abs(current.roll - stored.roll);
 
@@ -243,16 +332,12 @@ const App: React.FC = () => {
     );
   };
 
-  const compareLocation = (
-    current: LocationData,
-    stored: LocationData
-  ): boolean => {
+  const compareLocation = (current: LocationData, stored: LocationData): boolean => {
     const latitudeDifference = Math.abs(current.latitude - stored.latitude);
     const longitudeDifference = Math.abs(current.longitude - stored.longitude);
 
     return (
-      latitudeDifference <= TOLERANCE.latitude &&
-      longitudeDifference <= TOLERANCE.longitude
+      latitudeDifference <= TOLERANCE.latitude && longitudeDifference <= TOLERANCE.longitude
     );
   };
 
@@ -265,9 +350,7 @@ const App: React.FC = () => {
   };
 
   const toggleCameraFacing = () => {
-    setFacing((current) =>
-      current === 'back' ? 'front' : 'back'
-    );
+    setFacing((current) => (current === 'back' ? 'front' : 'back'));
   };
 
   if (!cameraPermission || hasLocationPermission === null) {
@@ -282,10 +365,7 @@ const App: React.FC = () => {
           We need your permission to access the camera and location
         </Text>
         {!cameraPermission.granted && (
-          <Button
-            onPress={requestCameraPermission}
-            title="Grant Camera Permission"
-          />
+          <Button onPress={requestCameraPermission} title="Grant Camera Permission" />
         )}
         {!hasLocationPermission && (
           <Button
@@ -302,11 +382,7 @@ const App: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <CameraView
-        style={styles.camera}
-        facing={facing}
-        ref={cameraRef}
-      >
+      <CameraView style={styles.camera} facing={facing} ref={cameraRef}>
         <View style={styles.buttonContainer}>
           <TouchableOpacity style={styles.button} onPress={toggleCameraFacing}>
             <Text style={styles.text}>Flip Camera</Text>
@@ -317,39 +393,19 @@ const App: React.FC = () => {
         <Button title="Take Photo" onPress={takePhoto} />
       </View>
       <View style={styles.infoContainer}>
-        <Text>
-          Current Latitude: {location?.latitude?.toFixed(6) ?? 'N/A'}
-        </Text>
-        <Text>
-          Current Longitude: {location?.longitude?.toFixed(6) ?? 'N/A'}
-        </Text>
-        <Text>
-          Azimuth: {orientation?.azimuth?.toFixed(2) ?? 'Calculating...'}°
-        </Text>
-        <Text>
-          Pitch: {orientation?.pitch?.toFixed(2) ?? 'Calculating...'}°
-        </Text>
-        <Text>
-          Roll: {orientation?.roll?.toFixed(2) ?? 'Calculating...'}°
-        </Text>
+        <Text>Current Latitude: {location?.latitude?.toFixed(6) ?? 'N/A'}</Text>
+        <Text>Current Longitude: {location?.longitude?.toFixed(6) ?? 'N/A'}</Text>
+        <Text>Azimuth: {orientation?.azimuth?.toFixed(2) ?? 'Calculating...'}°</Text>
+        <Text>Pitch: {orientation?.pitch?.toFixed(2) ?? 'Calculating...'}°</Text>
+        <Text>Roll: {orientation?.roll?.toFixed(2) ?? 'Calculating...'}°</Text>
         {storedOrientation && storedLocation && (
           <>
             <Text style={{ marginTop: 10 }}>Stored Data:</Text>
-            <Text>
-              Stored Latitude: {storedLocation.latitude.toFixed(6)}
-            </Text>
-            <Text>
-              Stored Longitude: {storedLocation.longitude.toFixed(6)}
-            </Text>
-            <Text>
-              Stored Azimuth: {storedOrientation.azimuth.toFixed(2)}°
-            </Text>
-            <Text>
-              Stored Pitch: {storedOrientation.pitch.toFixed(2)}°
-            </Text>
-            <Text>
-              Stored Roll: {storedOrientation.roll.toFixed(2)}°
-            </Text>
+            <Text>Stored Latitude: {storedLocation.latitude.toFixed(6)}</Text>
+            <Text>Stored Longitude: {storedLocation.longitude.toFixed(6)}</Text>
+            <Text>Stored Azimuth: {storedOrientation.azimuth.toFixed(2)}°</Text>
+            <Text>Stored Pitch: {storedOrientation.pitch.toFixed(2)}°</Text>
+            <Text>Stored Roll: {storedOrientation.roll.toFixed(2)}°</Text>
           </>
         )}
       </View>

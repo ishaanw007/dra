@@ -34,7 +34,7 @@
     "plugins": [
       "expo-router",
       [
-        "react-native-sensors",
+        "expo-sensors",
         {
           "motionPermission": "Allow $(PRODUCT_NAME) to access your device motion"
         }
